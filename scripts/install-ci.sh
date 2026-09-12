@@ -25,22 +25,20 @@ command -v sha256sum || {
 }
 
 runtime_root="${SITES_PROJECT_ROOT}/.sites-runtime"
-expected_home="${runtime_root}/home"
+install_home="${runtime_root}/home"
 expected_cache="${runtime_root}/npm-cache"
 
 echo "[sites] validating writable install environment"
-if [[ "${HOME}" != "${expected_home}" ]]; then
-  echo "Expected HOME=${expected_home}, got HOME=${HOME}." >&2
-  exit 78
-fi
+# Preserve the runtime's HOME; only the task-owned install scratch is writable here.
+mkdir -p "${install_home}"
 actual_cache="$(npm config get cache)"
 if [[ "${actual_cache}" != "${expected_cache}" ]]; then
   echo "Expected npm cache ${expected_cache}, got ${actual_cache}." >&2
   exit 78
 fi
-touch "${HOME}/.sites-write-test" "${expected_cache}/.sites-write-test"
-rm -f "${HOME}/.sites-write-test" "${expected_cache}/.sites-write-test"
-echo "[sites] environment passed: HOME=${HOME}, cache=${expected_cache}"
+touch "${install_home}/.sites-write-test" "${expected_cache}/.sites-write-test"
+rm -f "${install_home}/.sites-write-test" "${expected_cache}/.sites-write-test"
+echo "[sites] environment passed: install scratch=${install_home}, cache=${expected_cache}"
 
 lock_file="${runtime_root}/install.lock"
 exec 9>"${lock_file}"

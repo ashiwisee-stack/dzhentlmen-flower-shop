@@ -13,11 +13,6 @@ type AdminEnv = {
 const COOKIE = "dm_admin";
 const SESSION_TTL_MS = 12 * 60 * 60_000;
 
-// Recovery password is never stored in plaintext in the repository.
-// This SHA-256 hash provides an emergency recovery password without storing it in plaintext.
-const FALLBACK_ADMIN_PASSWORD_SHA256 =
-  "4f9d05e0d058ee77825a59033286781ac27a5eb1e9ec4dfd572b5c7b143009d1";
-
 function base64url(value: string) {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
@@ -132,10 +127,6 @@ async function validAdminPassword(password: string, values: AdminEnv) {
     Boolean(configured) &&
     configured!.length >= 12 &&
     !configured!.startsWith("replace_");
-
-  const candidateHash = await sha256Hex(password);
-  const recoveryMatches = safeEqual(candidateHash, FALLBACK_ADMIN_PASSWORD_SHA256);
-  if (recoveryMatches) return true;
 
   return configuredIsUsable ? safeEqual(password, configured!) : false;
 }

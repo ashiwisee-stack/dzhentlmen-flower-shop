@@ -16,6 +16,7 @@ export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { 
   const [enabled, setEnabled] = useState(false), [point, setPoint] = useState<Point | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [results, setResults] = useState<AddressResult[]>([]), [listOpen, setListOpen] = useState(false);
+  const [popupContainer, setPopupContainer] = useState<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState<AddressResult | null>(null), [quote, setQuote] = useState<Quote | null>(null);
   const pointRef = useRef(point), quoteCallback = useRef(onQuote);
   pointRef.current = point; quoteCallback.current = onQuote;
@@ -75,14 +76,14 @@ export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { 
     invalidate(); setSelected(result); onAddress(result.label); setPoint(result.coordinates); setListOpen(false); setEnabled(true);
     void request("quote", result.coordinates, result.label);
   }
-  return <div className="address-picker">
+  return <div className="address-picker" ref={setPopupContainer}>
     <label htmlFor={inputId}>Улица и дом в Екатеринбурге *</label>
     <Combobox items={results} filter={null} value={selected} inputValue={address} open={listOpen} onOpenChange={open => setListOpen(open && results.length > 0)} itemToStringLabel={result => result.label} isItemEqualToValue={(a, b) => a.label === b.label && a.coordinates.join() === b.coordinates.join()} onValueChange={choose} onInputValueChange={(value, details) => {
       if (details.reason !== "input-change" && details.reason !== "input-clear") return;
       invalidate(); setBusy(false); setSelected(null); setPoint(null); setResults([]); setListOpen(false); onAddress(value);
     }}>
       <ComboboxInput id={inputId} required minLength={5} maxLength={300} autoComplete="street-address" aria-describedby={hintId} placeholder="Например, ул. Малышева, 51" showTrigger={results.length > 0} onKeyDown={event => { if (event.key === "Enter" && !listOpen) { event.preventDefault(); void request("search"); } }} />
-      <ComboboxContent className="address-combobox"><ComboboxList>{(result: AddressResult) => <ComboboxItem key={result.label + result.coordinates.join()} value={result}>{result.label}</ComboboxItem>}</ComboboxList></ComboboxContent>
+      <ComboboxContent container={popupContainer} className="address-combobox"><ComboboxList>{(result: AddressResult) => <ComboboxItem key={result.label + result.coordinates.join()} value={result}>{result.label}</ComboboxItem>}</ComboboxList></ComboboxContent>
     </Combobox>
     <Button type="button" variant="outline" disabled={busy || !addressReady} onClick={() => void request("search")}><Search />{busy ? "Проверяем адрес…" : "Найти адрес"}</Button>
     <small>Нажмите «Найти адрес» и выберите дом из списка. Поиск получает только улицу и дом, без квартиры и телефона.</small>

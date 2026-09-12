@@ -10,6 +10,7 @@ import { settingsSchema } from "@/lib/settings-validation";
 import { sameOrigin } from "@/lib/security";
 import { paymentReady,paymentTest } from "@/lib/payments";
 import { smsReady } from "@/lib/sms";
+import { callcheckReady } from "@/lib/callcheck";
 import { telegramReady, flushNotifications } from "@/lib/telegram";
 import { env } from "cloudflare:workers";
 
@@ -26,7 +27,7 @@ export async function GET(request:Request) {
       db.select().from(customers).orderBy(desc(customers.createdAt)).limit(51).offset(page*50),
     ]);
     const totals=await database().prepare("SELECT (SELECT COUNT(*) FROM orders WHERE status='new') AS newOrders,(SELECT COUNT(*) FROM customers) AS customers,(SELECT COUNT(*) FROM custom_requests WHERE status='new') AS requests,(SELECT COALESCE(SUM(total),0) FROM orders WHERE status='completed') AS turnover").first();
-    return Response.json({ ...store, totals, requests: requestRows.slice(0,50), customers: customerRows.slice(0,50),requestsMore:requestRows.length>50,hasMore:requestRows.length>50||customerRows.length>50,integrations:{paymentTest:paymentTest(),sms:smsReady(),telegram:telegramReady(),payment:paymentReady(),geocoder:!!env.GEOCODER_URL || env.PHOTON_URL!=="disabled",router:!!env.ROUTER_URL} });
+    return Response.json({ ...store, totals, requests: requestRows.slice(0,50), customers: customerRows.slice(0,50),requestsMore:requestRows.length>50,hasMore:requestRows.length>50||customerRows.length>50,integrations:{paymentTest:paymentTest(),sms:smsReady(),call:callcheckReady(),telegram:telegramReady(),payment:paymentReady(),geocoder:!!env.GEOCODER_URL || env.PHOTON_URL!=="disabled",router:!!env.ROUTER_URL} });
   } catch (error) {
     console.error("admin:data", error);
     return Response.json({ error: "Не удалось загрузить данные" }, { status: 500 });
