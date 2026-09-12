@@ -11,7 +11,8 @@ async function callcheck(action: "add" | "status", fields: Record<string, string
   try {
     response = await fetch(`https://sms.ru/callcheck/${action}`, {
       method: "POST", body: new URLSearchParams({ api_id: String(env.SMS_RU_API_ID), json: "1", ...fields }),
-      signal: AbortSignal.timeout(12000), redirect: "error",
+      // Workers supports manual/follow only. Reject 3xx below without forwarding credentials.
+      signal: AbortSignal.timeout(12000), redirect: "manual",
     });
   } catch { throw new Error("SMS.RU не ответил. Повторите проверку позже; новую попытку входа сразу создавать не нужно."); }
   if (!response.ok) throw new Error("Сервис подтверждения временно недоступен.");
