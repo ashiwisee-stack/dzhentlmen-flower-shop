@@ -35,6 +35,19 @@ type AccountOrder = {
 };
 type Vacancy = { id: number; title: string; description: string; active: boolean };
 type StoreSettings = typeof DEFAULT_SETTINGS;
+type WebMcpContext = {
+  registerTool: (
+    tool: {
+      name: string;
+      title: string;
+      description: string;
+      inputSchema: object;
+      annotations: { readOnlyHint: boolean; untrustedContentHint: boolean };
+      execute: (input: unknown) => unknown;
+    },
+    options?: { signal?: AbortSignal },
+  ) => void | Promise<void>;
+};
 
 const orderLabels: Record<string, string> = {
   new: "Новый", confirmed: "Подтверждён", assembling: "Собираем", ready: "Готов",
@@ -150,6 +163,45 @@ export function Shop() {
       .filter((product) => !needle || [product.name, product.category, product.composition].join(" ").toLowerCase().includes(needle))
       .sort((a, b) => sort === "price-asc" ? a.price - b.price : sort === "price-desc" ? b.price - a.price : sort === "name" ? a.name.localeCompare(b.name, "ru") : Number(b.popular) - Number(a.popular));
   }, [products, filter, query, sort, favorites,categories]);
+
+  useEffect(() => {
+    const context = (document as Document & { modelContext?: WebMcpContext }).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    const visibleCategories = new Set(categories.filter((item) => item.visible).map((item) => item.name));
+
+    void Promise.resolve(context.registerTool({
+      name: "search_catalog",
+      title: "Найти товары в каталоге",
+      description: "Ищет доступные букеты и подарки магазина по названию, составу или категории без изменения корзины.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", minLength: 1, maxLength: 100 },
+          category: { type: "string", maxLength: 100 },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, untrustedContentHint: false },
+      execute(input) {
+        const value = input as { query?: unknown; category?: unknown };
+        const needle = typeof value.query === "string" ? value.query.trim().toLowerCase() : "";
+        const category = typeof value.category === "string" ? value.category.trim() : "";
+        if (!needle) throw new Error("Укажите непустой поисковый запрос");
+        return {
+          products: products
+            .filter((product) => product.available && !product.hidden && visibleCategories.has(product.category))
+            .filter((product) => !category || product.category === category)
+            .filter((product) => [product.name, product.category, product.composition].join(" ").toLowerCase().includes(needle))
+            .slice(0, 10)
+            .map((product) => ({ id: product.id, name: product.name, category: product.category, price: product.price })),
+        };
+      },
+    }, { signal: lifecycle.signal })).catch(() => undefined);
+
+    return () => lifecycle.abort();
+  }, [products, categories]);
 
   const extras = useMemo(() => Array.isArray(settings.extras) ? settings.extras : [], [settings.extras]);
   const resolvedCart = useMemo<ResolvedLine[]>(() => cart.flatMap((line) => {
