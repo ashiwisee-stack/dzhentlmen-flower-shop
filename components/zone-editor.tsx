@@ -1,0 +1,13 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import type { Map, Polygon, LayerGroup } from "leaflet";
+import { Button } from "@/components/ui/button";
+import { DEFAULT_SETTINGS } from "@/lib/catalog";
+type Point=[number,number];
+export function ZoneEditor({value,onChange,tileUrl}:{value:number[][];onChange:(v:number[][])=>void;tileUrl:string}) {
+  const [open,setOpen]=useState(false),node=useRef<HTMLDivElement>(null),map=useRef<Map|null>(null),shape=useRef<Polygon|null>(null),dots=useRef<LayerGroup|null>(null);
+  const valueRef=useRef(value),changeRef=useRef(onChange);
+  useEffect(()=>{valueRef.current=value;changeRef.current=onChange;shape.current?.setLatLngs(value as Point[]);dots.current?.clearLayers();void import("leaflet").then(L=>{value.forEach((p,i)=>{if(dots.current)L.circleMarker(p as Point,{radius:5,color:"#704083"}).bindTooltip(String(i+1)).addTo(dots.current);});});},[value,onChange]);
+  useEffect(()=>{if(!open||!node.current)return;let disposed=false;void import("leaflet").then(L=>{if(disposed||!node.current)return;const m=L.map(node.current,{scrollWheelZoom:false}).setView([56.835,60.59],11);map.current=m;m.attributionControl.setPrefix('<a href="https://leafletjs.com" title="Карта Leaflet">Leaflet</a>');L.tileLayer(tileUrl,{attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',maxZoom:18}).addTo(m);shape.current=L.polygon(valueRef.current as Point[],{color:"#704083",fillOpacity:.08}).addTo(m);dots.current=L.layerGroup().addTo(m);m.on("click",e=>{if(valueRef.current.length<200)changeRef.current([...valueRef.current,[e.latlng.lat,e.latlng.lng]]);});});return()=>{disposed=true;map.current?.remove();map.current=null;shape.current=null;dots.current=null;};},[open,tileUrl]);
+  return <section className="zone-editor"><h3>Граница доставки</h3><p>Исходная граница — пример зоны в Екатеринбурге. Согласуйте её с магазином. Для новой границы очистите контур и отмечайте углы по порядку, обходя район. Нужно минимум три точки. Затем сохраните настройки магазина.</p><div className="map-actions"><Button type="button" variant="outline" onClick={()=>setOpen(!open)}>{open?"Скрыть карту":"Редактировать на карте OpenStreetMap"}</Button><Button type="button" variant="outline" onClick={()=>onChange([])}>Очистить контур</Button><Button type="button" variant="outline" disabled={!value.length} onClick={()=>onChange(value.slice(0,-1))}>Убрать последнюю точку</Button><Button type="button" variant="outline" onClick={()=>onChange(DEFAULT_SETTINGS.deliveryZone)}>Вернуть пример</Button></div>{open&&<div ref={node} className="delivery-map" aria-label="Отмечайте углы границы доставки"/>}<p>{value.length} точек{value.length<3?" — добавьте точки перед сохранением":""}</p></section>;
+}

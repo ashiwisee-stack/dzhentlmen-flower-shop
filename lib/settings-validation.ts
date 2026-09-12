@@ -1,0 +1,20 @@
+import { z } from "zod";
+export const settingsSchema=z.object({
+  minOrder:z.number().int().min(0).max(1000000),
+  deliveryBase:z.number().int().min(0).max(100000),
+  deliveryPerKm:z.number().min(0).max(10000),
+  deliveryIncludedKm:z.number().min(0).max(100),
+  leadTimeHours:z.number().min(0).max(168),
+  bonusPercent:z.number().min(0).max(100),
+  bonusMaxSpendPercent:z.number().min(0).max(100),
+  deliveryOpen:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  deliveryClose:z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  phone:z.string().max(40),about:z.string().max(10000),
+  legalName:z.string().max(300),inn:z.string().max(12),ogrnip:z.string().max(15),legalAddress:z.string().max(500),contactEmail:z.string().max(200),
+  bankAccount:z.string().max(20),bankName:z.string().max(300),bankBik:z.string().max(9),bankCorrespondent:z.string().max(20),bankInn:z.string().max(12),bankKpp:z.string().max(9),
+  demoCatalog:z.boolean(),
+  tileUrl:z.string().url().startsWith("https://"),
+  deliveryMode:z.enum(["estimate","road"]),
+  deliveryZone:z.array(z.tuple([z.number().min(56.5).max(57.2),z.number().min(60).max(61.2)])).min(3).max(200),
+  extras:z.array(z.object({id:z.string().min(1).max(100),name:z.string().min(1).max(150),price:z.number().int().min(0).max(100000),description:z.string().max(1000),available:z.boolean().optional(),kind:z.enum(["flower","accessory"]).optional(),image:z.string().max(1000).optional()})).max(100).refine(items=>new Set(items.map(i=>i.id)).size===items.length,"Повторяются идентификаторы дополнений"),
+});

@@ -1,0 +1,53 @@
+/* Corrections from the owner's September 11 brief. */
+.phone-field-wrap {display:block;min-width:0;}
+.phone-field {display:flex!important;align-items:center;gap:0;border:1px solid #d6c8dc;border-radius:10px;background:white;overflow:hidden;}
+.phone-field:focus-within {outline:2px solid #704083;outline-offset:2px;}
+.phone-field .phone-prefix {flex:0 0 auto;padding:0 12px 0 14px;color:#512563;font-size:1rem!important;white-space:nowrap;}
+.phone-field input {flex:1;width:0!important;min-width:0;border:0!important;border-radius:0!important;box-shadow:none!important;outline:none!important;padding-left:0!important;font-size:1rem!important;min-height:48px;}
+.phone-field-wrap>small {display:block;margin-top:5px;color:#75677a;font-size:.8rem;}
+.cart-extra-editor>.flower-search {display:block;margin:12px 0;font-size:.875rem;}
+.flower-search>span {display:block;margin-bottom:5px;}
+.flower-search input {display:block;width:100%;min-height:44px;border:1px solid #d6c8dc;border-radius:9px;padding:10px 12px;background:white;font-size:1rem;}
+.extra-options {max-height:360px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;}
+.extra-options>p {padding:12px;color:#75677a;}
+.recent-order-banner {max-width:1224px;margin:18px auto;padding:18px 24px;border:1px solid #d8c5df;border-radius:16px;background:#f4edf7;display:flex;align-items:center;justify-content:space-between;gap:16px;color:#512563;}
+.recent-order-banner>div {display:grid;gap:6px;min-width:0;}
+.recent-order-banner span {font-size:.875rem;overflow-wrap:anywhere;}
+.recent-order-banner button {min-height:44px;flex-shrink:0;}
+.recent-orders-dialog {width:min(94vw,620px);max-width:620px;max-height:90dvh;overflow-y:auto;}
+.recent-orders-list {display:grid;gap:14px;}
+.recent-orders-list article {padding:18px;border:1px solid #dfd2e4;border-radius:12px;background:#fcfafc;}
+.recent-orders-list article>div {display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+.recent-orders-list p {margin:8px 0;font-size:.95rem;}
+.recent-orders-list small {display:block;margin:8px 0;color:#75677a;}
+.pricing-mode>label,.single-flower-toggle {display:flex!important;align-items:center;justify-content:space-between;gap:20px;padding:16px;background:#f4edf7;border-radius:12px;}
+.pricing-mode strong,.single-flower-toggle strong {display:block;}
+.pricing-mode small,.single-flower-toggle small {display:block;margin-top:6px;font-size:.875rem;line-height:1.5;color:#75677a;}
+.single-price input {max-width:360px;}
+.address-picker>[data-slot="input-group"] {width:100%;}
+.address-picker>label {font-size:.875rem;font-weight:600;}
+.address-picker>small {display:block;margin:8px 0;font-size:.8rem;line-height:1.5;color:#75677a;}
+.address-combobox {z-index:90;max-width:min(90vw,540px);background:white;color:#382540;}
+.address-combobox [data-slot="combobox-item"] {white-space:normal;overflow-wrap:anywhere;min-height:48px;padding:12px 34px 12px 14px;line-height:1.5;cursor:pointer;}
+.address-combobox [data-highlighted] {background:#f1e8f5;}
+.delivery-confirmed span {overflow-wrap:anywhere;}
+.image-manager .image-list img {object-fit:cover;}
+.gallery-main img,.zoom-photo img {object-fit:contain;}
+@media(max-width:1260px) {.recent-order-banner {margin-left:24px;margin-right:24px;}}
+@media(max-width:600px) {
+  .recent-order-banner {margin:16px;padding:16px;align-items:stretch;flex-direction:column;}
+  .recent-order-banner button {width:100%;}
+  .pricing-mode>label,.single-flower-toggle {padding:12px;gap:12px;}
+  .payment-page .recent-order-banner {margin-left:0;margin-right:0;}
+}
+
+.customer-login { margin-top: 1rem; }
+.customer-login [role=tablist] { width: 100%; min-height: 44px; }
+.customer-login [role=tab] { font-size: 1rem; min-height: 38px; }
+.call-login-form { display: grid; gap: 16px; width: 100%; }
+.call-login-form > label { display: grid; gap: 6px; font-size: 1rem; text-align: left; }
+.call-login-form > label.check-row { display: flex; }
+.call-login .call-number { display: flex; justify-content: center; gap: 10px; padding: 16px 8px; border: 1px solid var(--border); border-radius: 16px; font-size: clamp(1.1rem, 5vw, 1.5rem); color: var(--primary); font-weight: 700; }
+.call-login .call-timer { font-variant-numeric: tabular-nums; }
+.call-login small { font-size: .875rem; line-height: 1.5; }
+

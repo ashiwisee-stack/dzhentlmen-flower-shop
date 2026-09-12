@@ -1,0 +1,11 @@
+import Link from "next/link";
+import { env } from "cloudflare:workers";
+import { LegalDetails } from "@/components/legal-details";
+import { readStoreData } from "@/lib/store-storage";
+import rows from "@/lib/offer-content.json";
+import { paymentTest } from "@/lib/payments";
+export const dynamic="force-dynamic";
+export default async function OfferPage() {
+  const {settings:s}=await readStoreData();
+  return <main className="legal-page"><Link className="legal-back" href="/">← Вернуться в магазин</Link><article><span className="eyebrow">Редакция от 8 сентября 2026 года</span><h1>Публичная оферта</h1>{paymentTest()&&<p className="test-payment-note">Сайт работает в тестовом режиме. Тестовая оплата не списывает деньги и не означает заказ реальной доставки.</p>}<h2>Условия магазина</h2><p>Единый каталог двух мастерских в Екатеринбурге. Самовывоз бесплатный, круглосуточно, из выбранной мастерской. Минимальная сумма товаров — {String(s.minOrder)} ₽.</p><p>Доставка в доступной на карте зоне Екатеринбурга: первые {String(s.deliveryIncludedKm)} км включены, базовая стоимость {String(s.deliveryBase)} ₽, далее {String(s.deliveryPerKm)} ₽ за километр. Неполный километр рассчитывается пропорционально; расстояние округляется до 0,1 км, цена — до целого рубля. Расчёт ведётся от ближайшей мастерской. {s.deliveryMode==="road"?"Используется автомобильный маршрут.":"Используется приблизительная оценка: расстояние по прямой с коэффициентом 1,28. Это не длина автомобильного маршрута."} Итоговая стоимость показывается до подтверждения заказа.</p><p>Доставка с {String(s.deliveryOpen)} до {String(s.deliveryClose)}, заказ минимум за {String(s.leadTimeHours)} ч. Время Екатеринбурга.</p><p>Бонусы: начисление {String(s.bonusPercent)}% от стоимости товаров после списания бонусов при выполнении заказа. Один балл равен одному рублю скидки. Баллами можно оплатить до {String(s.bonusMaxSpendPercent)}% стоимости товаров; доставка оплачивается отдельно. Начисление округляется вниз до целого балла. При отмене списанные баллы возвращаются, начисление отменяется.</p>{rows.map((row,i)=>row.kind==="h2"?<h2 key={i}>{row.text}</h2>:<p key={i}>{row.text.replaceAll("{SITE}",String(env.PUBLIC_ORIGIN||"настоящего интернет-магазина"))}</p>)}<LegalDetails/></article></main>;
+}

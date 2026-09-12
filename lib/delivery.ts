@@ -1,0 +1,85 @@
+import { env } from "cloudflare:workers";
+import { BRANCHES, DEFAULT_SETTINGS } from "@/lib/catalog";
+import { readStoreData } from "@/lib/store-storage";
+import { authSecret } from "@/lib/customer-auth";
+import { safeEqual } from "@/lib/security";
+export type Coordinates = [number,number];
+export function inZone(point:Coordinates, polygon:number[][]) {
+  let inside=false;
+  for(let i=0,j=polygon.length-1;i<polygon.length;j=i++) {
+    const [yi,xi]=polygon[i], [yj,xj]=polygon[j], [y,x]=point;
+    if ((yi>y)!==(yj>y) && x<(xj-xi)*(y-yi)/(yj-yi)+xi) inside=!inside;
+  }
+  return inside;
+}
+export async function findAddresses(query:string) {
+  const {settings}=await readStoreData();
+  const zone=settings.deliveryZone as number[][];
+  const search = /екатеринбург/i.test(query) ? query : "Екатеринбург, " + query;
+  let rows:{label:string;coordinates:Coordinates}[];
+  if (env.GEOCODER_URL) {
+    const url=new URL("search",String(env.GEOCODER_URL).replace(/\/?$/,"/"));
+    url.search=new URLSearchParams({q:search,format:"jsonv2",limit:"8",addressdetails:"1",countrycodes:"ru"}).toString();
+    const response=await fetch(url,{signal:AbortSignal.timeout(8000)});
+    if(!response.ok) throw new Error("Поиск адресов временно недоступен. Выберите точку на карте.");
+    const data=await response.json() as {display_name:string;lat:string;lon:string}[];
+    rows=data.map(row=>({label:row.display_name,coordinates:[Number(row.lat),Number(row.lon)]}));
+  } else {
+    // Explicit searches only. Public Photon permits reasonable use but has no SLA.
+    // Operators may configure their own Photon or the existing Nominatim adapter.
+    if(env.PHOTON_URL === "disabled") throw new Error("Поиск адресов отключён. Укажите адрес и отметьте дом на карте.");
+    const url=new URL("api",String(env.PHOTON_URL || "https://photon.komoot.io/").replace(/\/?$/,"/"));
+    const lat=zone.map(point=>point[0]),lon=zone.map(point=>point[1]);
+    url.search=new URLSearchParams({q:search,limit:"8",bbox:[Math.min(...lon),Math.min(...lat),Math.max(...lon),Math.max(...lat)].join(","),lat:"56.835",lon:"60.59"}).toString();
+    const response=await fetch(url,{headers:{"accept-language":"ru"},signal:AbortSignal.timeout(8000)});
+    if(!response.ok) throw new Error("Поиск адресов временно недоступен. Попробуйте позже или отметьте дом на карте.");
+    const data=await response.json() as {features?:{geometry:{coordinates:number[]};properties:Record<string,string>}[]};
+    rows=(data.features || []).map(feature=>{
+      const p=feature.properties;
+      const street=[p.street||p.name,p.housenumber].filter(Boolean).join(", ");
+      return {label:[p.city||p.town||"Екатеринбург",street].filter(Boolean).join(", "),coordinates:[feature.geometry.coordinates[1],feature.geometry.coordinates[0]]};
+    });
+  }
+  return rows.filter((row,index)=>row.label && row.coordinates.every(Number.isFinite) && inZone(row.coordinates,zone) && rows.findIndex(other=>other.label===row.label && other.coordinates.join()===row.coordinates.join())===index);
+}
+function directKm(a:Coordinates,b:Coordinates) {
+  const rad=(n:number)=>n*Math.PI/180;
+  const h=Math.sin(rad(b[0]-a[0])/2)**2+Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(rad(b[1]-a[1])/2)**2;
+  return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
+}
+async function signature(value:string) {
+  const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(authSecret()),{name:"HMAC",hash:"SHA-256"},false,["sign"]);
+  return Array.from(new Uint8Array(await crypto.subtle.sign("HMAC",key,new TextEncoder().encode(value)))).map(n=>n.toString(16).padStart(2,"0")).join("");
+}
+export async function quoteDelivery(address:string,point?:Coordinates) {
+  const destination=point || (await findAddresses(address))[0]?.coordinates;
+  if (!destination || destination.length!==2 || !destination.every(Number.isFinite)) throw new Error("Выберите адрес или точку доставки");
+  const store=await readStoreData(),s={...DEFAULT_SETTINGS,...store.settings};
+  if(!inZone(destination,s.deliveryZone)) throw new Error("Адрес находится за пределами зоны доставки");
+  const candidates=await Promise.all(BRANCHES.map(async branch=>{
+    if(s.deliveryMode==="road") {
+      if(!env.ROUTER_URL) throw new Error("Расчёт по дорогам не настроен. Выберите самовывоз или свяжитесь с магазином.");
+      const url=new URL("route/v1/driving/"+branch.coordinates.slice().reverse().join(",")+";"+destination.slice().reverse().join(","),String(env.ROUTER_URL).replace(/\/?$/,"/"));
+      url.searchParams.set("overview","false");
+      const res=await fetch(url,{signal:AbortSignal.timeout(8000)}),data=await res.json() as {code:string;routes?:{distance:number}[]};
+      if(!res.ok || data.code!=="Ok" || !data.routes?.length) throw new Error("Не удалось построить автомобильный маршрут");
+      return {branch,km:data.routes[0].distance/1000};
+    }
+    return {branch,km:Math.max(1,directKm(branch.coordinates,destination)*1.28)};
+  }));
+  const nearest=candidates.sort((a,b)=>a.km-b.km)[0];
+  const distanceKm=Number(nearest.km.toFixed(1));
+  const price=Math.round(s.deliveryBase+Math.max(0,distanceKm-s.deliveryIncludedKm)*s.deliveryPerKm);
+  const quote={address:address.trim(),coordinates:destination,distanceKm,price,branch:nearest.branch,method:s.deliveryMode==="road"?"road":"estimate",expires:Date.now()+15*60000};
+  const encoded=btoa(unescape(encodeURIComponent(JSON.stringify(quote))));
+  return {...quote,token:encoded+"."+await signature(encoded)};
+}
+export async function verifyQuote(token:string,address:string) {
+  const [value,sig]=token.split(".");
+  if(!value || !sig || !safeEqual(await signature(value),sig)) throw new Error("Рассчитайте доставку заново");
+  const quote=JSON.parse(decodeURIComponent(escape(atob(value)))) as Awaited<ReturnType<typeof quoteDelivery>>;
+  if(quote.expires<Date.now() || quote.address!==address.trim()) throw new Error("Расчёт доставки устарел. Рассчитайте заново.");
+  const store=await readStoreData();
+  if(!inZone(quote.coordinates,store.settings.deliveryZone as number[][])) throw new Error("Этот адрес больше не входит в зону доставки");
+  return quote;
+}
