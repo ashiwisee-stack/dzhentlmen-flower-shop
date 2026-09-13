@@ -23,7 +23,7 @@ export async function POST(request:Request) {
     const [order]=await getDb().select().from(orders).where(eq(orders.id,String(p.id))).limit(1);
     const customer=await getCustomer();
     if(!order || !(customer && customer.id===order.customerId) && (!p.accessToken || await sha256(p.accessToken)!==order.accessHash)) return Response.json({error:"Заказ недоступен"},{status:404});
-    if(p.action==="status") return Response.json({orderNumber:order.orderNumber,total:order.total,paymentStatus:order.paymentStatus,status:order.status,test:JSON.parse(order.deliveryDetails).paymentTest===true});
+    if(p.action==="status") return Response.json({orderNumber:order.orderNumber,total:order.total,paymentStatus:order.paymentStatus,status:order.status,test:!!order.robokassaInvoiceId && JSON.parse(order.deliveryDetails).paymentTest===true});
     if(order.paymentStatus!=="pending" || order.status==="cancelled") throw new Error("Этот заказ не ожидает оплаты");
     const items=await getDb().select().from(orderItems).where(eq(orderItems.orderId,order.id));
     const details=JSON.parse(order.deliveryDetails);

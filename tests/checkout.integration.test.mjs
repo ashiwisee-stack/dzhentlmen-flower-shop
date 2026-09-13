@@ -56,12 +56,17 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     const product=store.body.products.find(p=>p.available);
     const variant=product.variants.find(v=>v.available);
     const date=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
-    const payload={requestKey:crypto.randomUUID(),accessToken:crypto.randomUUID(),customerName:'Анна',phone:'+79991234567',fulfillment:'pickup',branchId:'kraulya',deliveryDate:date,deliveryTime:'02:00',consent:true,offerAccepted:true,bonusSpend:0,expectedTotal:variant.price,items:[{productId:product.id,variantId:variant.id,quantity:1,extras:[]}]};
+    const payload={requestKey:crypto.randomUUID(),accessToken:crypto.randomUUID(),customerName:'Анна',phone:'+79991234567',fulfillment:'pickup',branchId:'kraulya',address:'Остаток адреса доставки',apartment:'12',entrance:'3',floor:'5',intercom:'99',deliveryToken:'stale-token',deliveryDate:date,deliveryTime:'02:00',consent:true,offerAccepted:true,bonusSpend:0,expectedTotal:variant.price,items:[{productId:product.id,variantId:variant.id,quantity:1,extras:[]}]};
     const unavailable=await decode(await api.orders.POST(request('/api/orders',{...payload,paymentMethod:'online'})));
     assert.equal(unavailable.status,400,'unconfigured online payment must not silently switch to receipt');
     assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM orders').get().n,0);
     let r=await decode(await api.orders.POST(request('/api/orders',payload)));assert.equal(r.status,201,JSON.stringify(r.body));
     const firstId=r.body.id;
+    const pickupRow=sqlite.prepare('SELECT address,delivery_price,delivery_details FROM orders WHERE id=?').get(firstId);
+    assert.equal(pickupRow.address,'');assert.equal(pickupRow.delivery_price,0);
+    const pickupDetails=JSON.parse(pickupRow.delivery_details);
+    assert.equal(pickupDetails.paymentTest,false,'offline order is never a test Robokassa order');
+    for(const key of ['apartment','entrance','floor','intercom']) assert.equal(pickupDetails[key],'','pickup drops stale delivery instructions');
     r=await decode(await api.orders.POST(request('/api/orders',payload)));assert.equal(r.body.id,firstId);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM orders').get().n,1);
     r=await decode(await api.orders.POST(request('/api/orders',{...payload,expectedTotal:1})));assert.equal(r.status,409);
     r=await decode(await api.orders.POST(request('/api/orders',{...payload,requestKey:crypto.randomUUID(),expectedTotal:1})));assert.equal(r.status,400);
@@ -115,9 +120,31 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     // The map tariff is computed on the server, including its free radius.
     const freeQuote=await api.deliveryLib.quoteDelivery('Крауля, 105/3',[56.831251,60.523849]);
     assert.equal(freeQuote.price,0);
+    assert.equal(freeQuote.distanceKm,0,'same point must not acquire an artificial one-kilometre distance');
+    assert.equal(freeQuote.branch.id,'kraulya');
+    assert.equal((await api.deliveryLib.verifyQuote(freeQuote.token,freeQuote.address)).price,0);
+    await assert.rejects(api.deliveryLib.verifyQuote(freeQuote.token,'Другой адрес'));
+    await assert.rejects(api.deliveryLib.verifyQuote(freeQuote.token+'tampered',freeQuote.address));
+    sqlite.prepare("INSERT INTO store_settings(key,value) VALUES('deliveryBase','100') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run();
+    await assert.rejects(api.deliveryLib.verifyQuote(freeQuote.token,freeQuote.address),/Тариф доставки изменился/);
+    sqlite.prepare("DELETE FROM store_settings WHERE key='deliveryBase'").run();
     const farQuote=await api.deliveryLib.quoteDelivery('Тестовая улица, 1',[56.87,60.65]);
     assert.equal(farQuote.price,Math.round(Math.max(0,farQuote.distanceKm-2)*50));
     assert.equal(store.body.settings.bonusMaxSpendPercent,50);
+    // A delivery persists the selected address, quote and optional access details together.
+    sqlite.prepare('UPDATE products SET hidden=0 WHERE id=?').run(product.id);
+    const delivered=await decode(await api.orders.POST(request('/api/orders',{...payload,requestKey:crypto.randomUUID(),fulfillment:'delivery',address:farQuote.address,deliveryToken:farQuote.token,deliveryTime:'12:00',expectedTotal:variant.price+farQuote.price})));
+    assert.equal(delivered.status,201,JSON.stringify(delivered.body));
+    const deliveryRow=sqlite.prepare('SELECT address,branch_id,delivery_price,delivery_details FROM orders WHERE id=?').get(delivered.body.id);
+    assert.equal(deliveryRow.address,farQuote.address);assert.equal(deliveryRow.delivery_price,farQuote.price);assert.equal(deliveryRow.branch_id,farQuote.branch.id);
+    assert.equal(JSON.parse(deliveryRow.delivery_details).apartment,'12');assert.equal(JSON.parse(deliveryRow.delivery_details).distanceKm,farQuote.distanceKm);
+    globalThis.__shopTestHeaders=new Headers({cookie:admin.response.headers.get('set-cookie').split(';')[0]});
+    const roadSettings=await decode(await api.settings.PATCH(request('/api/admin/data',{entity:'settings',values:{deliveryMode:'road'}})));
+    assert.equal(roadSettings.status,400,'admin cannot enable road pricing without a router');
+    const diagnostics=await decode(await api.settings.GET(new Request('http://localhost/api/admin/data')));
+    assert.equal(diagnostics.status,200);assert.ok(diagnostics.body.paymentSetup.missing.includes('ROBOKASSA_PASSWORD1'));
+    assert.equal(JSON.stringify(diagnostics.body.paymentSetup).includes('test-admin-password'),false);
+    globalThis.__shopTestHeaders=new Headers();
     // Telegram: own contact, browser binding, expiry and one-time consumption.
     Object.assign(globalThis.__shopTestEnv,{TELEGRAM_BOT_TOKEN:'fake-token',TELEGRAM_BOT_USERNAME:'test_bot',PUBLIC_ORIGIN:'https://shop.example.test'});
     const previousFetch=globalThis.fetch;
@@ -157,7 +184,7 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     assert.equal(payLink.searchParams.get('IsTest'),'1');assert.equal(payLink.searchParams.has('Receipt'),false);
     assert.equal(payLink.searchParams.get('SignatureValue'),await api.payments.paymentHash('test-shop:2990.00:101:test-password-one'));
     const md5=await api.payments.paymentHash(variant.price+'.00:101:test-result-password');
-    sqlite.prepare("UPDATE orders SET robokassa_invoice_id='101',payment_status='pending' WHERE id=?").run(firstId);
+    sqlite.prepare("UPDATE orders SET robokassa_invoice_id='101',payment_status='pending',delivery_details=json_set(delivery_details,'$.paymentTest',json('true')) WHERE id=?").run(firstId);
     assert.equal((await api.result.POST(new Request('http://localhost/api/payment/result',{method:'POST',body:new URLSearchParams({OutSum:variant.price+'.00',InvId:'101',SignatureValue:md5})}))).status,200);
     delete globalThis.__shopTestEnv.ROBOKASSA_HASH_ALGORITHM;
     globalThis.__shopTestEnv.ROBOKASSA_PASSWORD2='test-result-password';

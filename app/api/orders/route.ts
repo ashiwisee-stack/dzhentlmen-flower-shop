@@ -70,7 +70,8 @@ export async function POST(request:Request) {
     const recipientName=p.otherRecipient?String(p.recipientName||"").trim().slice(0,100):"";
     const recipientPhone=p.otherRecipient?normalizePhone(String(p.recipientPhone||"")):"";
     if(p.otherRecipient && (!recipientName || !recipientPhone)) throw new Error("Укажите имя и телефон получателя");
-    const details={apartment:String(p.apartment||"").slice(0,30),entrance:String(p.entrance||"").slice(0,30),floor:String(p.floor||"").slice(0,10),intercom:String(p.intercom||"").slice(0,30),coordinates:quote?.coordinates,method:quote?.method,consentAt:new Date().toISOString(),consentVersion:CONSENT_VERSION,offerVersion:CONSENT_VERSION,paymentTest:paymentTest(),fiscal:fiscalSettings()};
+    const deliveryField=(key:string,max:number)=>fulfillment==="delivery"?String(p[key]||"").trim().slice(0,max):"";
+    const details={apartment:deliveryField("apartment",30),entrance:deliveryField("entrance",30),floor:deliveryField("floor",10),intercom:deliveryField("intercom",30),coordinates:quote?.coordinates,method:quote?.method,distanceKm:quote?.distanceKm,tariff:quote?.tariff,consentAt:new Date().toISOString(),consentVersion:CONSENT_VERSION,offerVersion:CONSENT_VERSION,paymentTest:onlinePayment && paymentTest(),fiscal:fiscalSettings()};
     Object.assign(details, { paymentMethod });
     const invoice=onlinePayment?String(BigInt("0x"+crypto.randomUUID().replaceAll("-","").slice(0,15))):null;
     const paymentStatus=onlinePayment?"pending":"not_required";

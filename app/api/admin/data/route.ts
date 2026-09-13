@@ -8,7 +8,7 @@ import { readStoreData } from "@/lib/store-storage";
 import { DEFAULT_SETTINGS } from "@/lib/catalog";
 import { settingsSchema } from "@/lib/settings-validation";
 import { sameOrigin } from "@/lib/security";
-import { paymentReady,paymentTest } from "@/lib/payments";
+import { paymentReady,paymentTest,paymentSetup } from "@/lib/payments";
 import { smsReady } from "@/lib/sms";
 import { callcheckReady } from "@/lib/callcheck";
 import { telegramReady, flushNotifications } from "@/lib/telegram";
@@ -26,8 +26,8 @@ export async function GET(request:Request) {
       db.select().from(customRequests).orderBy(desc(customRequests.createdAt)).limit(51).offset(page*50),
       db.select().from(customers).orderBy(desc(customers.createdAt)).limit(51).offset(page*50),
     ]);
-    const totals=await database().prepare("SELECT (SELECT COUNT(*) FROM orders WHERE status='new') AS newOrders,(SELECT COUNT(*) FROM customers) AS customers,(SELECT COUNT(*) FROM custom_requests WHERE status='new') AS requests,(SELECT COALESCE(SUM(total),0) FROM orders WHERE status='completed') AS turnover").first();
-    return Response.json({ ...store, totals, requests: requestRows.slice(0,50), customers: customerRows.slice(0,50),requestsMore:requestRows.length>50,hasMore:requestRows.length>50||customerRows.length>50,integrations:{paymentTest:paymentTest(),sms:smsReady(),call:callcheckReady(),telegram:telegramReady(),payment:paymentReady(),geocoder:!!env.GEOCODER_URL || env.PHOTON_URL!=="disabled",router:!!env.ROUTER_URL} });
+    const totals=await database().prepare("SELECT (SELECT COUNT(*) FROM orders WHERE status='new') AS newOrders,(SELECT COUNT(*) FROM customers) AS customers,(SELECT COUNT(*) FROM custom_requests WHERE status='new') AS requests,(SELECT COALESCE(SUM(total),0) FROM orders WHERE status='completed' AND (robokassa_invoice_id IS NULL OR COALESCE(json_extract(delivery_details,'$.paymentTest'),0)!=1)) AS turnover").first();
+    return Response.json({ ...store, totals, paymentSetup:paymentSetup(), requests: requestRows.slice(0,50), customers: customerRows.slice(0,50),requestsMore:requestRows.length>50,hasMore:requestRows.length>50||customerRows.length>50,integrations:{paymentTest:paymentTest(),sms:smsReady(),call:callcheckReady(),telegram:telegramReady(),payment:paymentReady(),geocoder:!!env.GEOCODER_URL || env.PHOTON_URL!=="disabled",router:!!env.ROUTER_URL} });
   } catch (error) {
     console.error("admin:data", error);
     return Response.json({ error: "Не удалось загрузить данные" }, { status: 500 });
@@ -45,6 +45,7 @@ export async function PATCH(request: Request) {
     const db = getDb();
     if (entity === "settings") {
       const values = settingsSchema.parse({...DEFAULT_SETTINGS,...((await readStoreData()).settings),...(payload.values as object)});
+      if(values.deliveryMode==="road" && !env.ROUTER_URL) throw new Error("Сначала подключите сервер автомобильных маршрутов. Пока доступен приблизительный расчёт.");
       await database().batch(Object.entries(values).map(([key,value])=>database().prepare("INSERT INTO store_settings(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").bind(key,JSON.stringify(value),new Date().toISOString())));
     } else if (entity === "category") {
       const name=String(payload.name || "").trim();

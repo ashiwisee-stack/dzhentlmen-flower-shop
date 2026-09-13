@@ -2,7 +2,24 @@ import { env } from "cloudflare:workers";
 import { createHash } from "node:crypto";
 export function paymentTest() { return env.ROBOKASSA_TEST !== "0"; }
 export async function paymentHash(value:string) { const algorithm=String(env.ROBOKASSA_HASH_ALGORITHM || "SHA256").toLowerCase(); if(!["md5","sha256"].includes(algorithm)) throw new Error("Неподдерживаемый алгоритм Робокассы"); return createHash(algorithm).update(value,"utf8").digest("hex"); }
-export function paymentReady() { return env.ROBOKASSA_ENABLED === "1" && !!env.ROBOKASSA_LOGIN && !!env.ROBOKASSA_PASSWORD1 && !!env.ROBOKASSA_PASSWORD2 && (paymentTest() || (!!env.ROBOKASSA_TAX && !!env.ROBOKASSA_SNO && ["full_payment","full_prepayment"].includes(String(env.ROBOKASSA_PAYMENT_METHOD)))) && !!env.PUBLIC_ORIGIN; }
+export function paymentSetup() {
+  const required = ["ROBOKASSA_LOGIN", "ROBOKASSA_PASSWORD1", "ROBOKASSA_PASSWORD2", "PUBLIC_ORIGIN"] as const;
+  const missing:string[] = required.filter(key => !String(env[key] || "").trim());
+  if (env.ROBOKASSA_ENABLED !== "1") missing.push("ROBOKASSA_ENABLED=1");
+  const hash = String(env.ROBOKASSA_HASH_ALGORITHM || "SHA256").toUpperCase();
+  if (!["MD5", "SHA256"].includes(hash)) missing.push("ROBOKASSA_HASH_ALGORITHM: MD5 или SHA256");
+  if (!paymentTest()) {
+    if (!env.ROBOKASSA_TAX) missing.push("ROBOKASSA_TAX");
+    if (!env.ROBOKASSA_SNO) missing.push("ROBOKASSA_SNO");
+    if (!["full_payment", "full_prepayment"].includes(String(env.ROBOKASSA_PAYMENT_METHOD))) missing.push("ROBOKASSA_PAYMENT_METHOD");
+  }
+  const origin = String(env.PUBLIC_ORIGIN || "").replace(/\/$/, "");
+  return {ready:missing.length===0, test:paymentTest(), hash, missing,
+    resultUrl:origin ? origin+"/api/payment/result" : "",
+    successUrl:origin ? origin+"/payment?result=success" : "",
+    failUrl:origin ? origin+"/payment?result=fail" : ""};
+}
+export function paymentReady() { return paymentSetup().ready; }
 export function receiptItems(items:{productName:string;variantName:string;price:number;quantity:number}[],bonus:number,delivery:number,tax:string,method:string) {
   const subtotal=items.reduce((s,i)=>s+i.price*i.quantity,0);
   let remaining=bonus*100;

@@ -2479,3 +2479,14 @@ button {
   color: #fff;
   font-weight: 700;
 }
+
+/* One confirmed delivery address, with optional access details. */
+.delivery-confirmed { display: grid; gap: 10px; padding: 18px; border: 1px solid #d7cadd; border-radius: 16px; background: #faf7fb; }
+.delivery-confirmed > strong { font-size: 1.1rem; }
+.delivery-confirmed > p, .delivery-confirmed > small { margin: 0; }
+.delivery-details { border-top: 1px solid #e4dce7; padding-top: 12px; }
+.delivery-details summary { cursor: pointer; line-height: 1.5; font-weight: 600; }
+.delivery-details .form-grid { margin-top: 14px; }
+.payment-setup { margin: 16px 0 24px; padding: 18px; border: 1px solid #ddd2e1; border-radius: 14px; overflow-wrap: anywhere; }
+.payment-setup p { margin: 8px 0; }
+.payment-setup code { user-select: all; }

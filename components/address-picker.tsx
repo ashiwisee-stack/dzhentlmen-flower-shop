@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { Map as LeafletMap, Marker } from "leaflet";
 import { Button } from "@/components/ui/button";
 import { Combobox, ComboboxContent, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/ui/combobox";
@@ -7,9 +7,9 @@ import { MapPin, Search } from "lucide-react";
 import { BRANCHES, formatPrice } from "@/lib/catalog";
 import type { AddressResult } from "@/lib/address-results";
 type Point = [number, number];
-export type Quote = { coordinates:Point; price: number; distanceKm: number; branch: typeof BRANCHES[number]; method: string; token: string; address: string };
+export type Quote = { coordinates:Point; price: number; distanceKm: number; branch: typeof BRANCHES[number]; method: string; token: string; address: string; expires:number; tariff?:{base:number;perKm:number;includedKm:number} };
 
-export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { address: string; onAddress: (value: string) => void; onQuote: (quote: Quote | null) => void; tileUrl: string; zone: number[][] }) {
+export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone, children }: { address: string; onAddress: (value: string) => void; onQuote: (quote: Quote | null) => void; tileUrl: string; zone: number[][]; children?:ReactNode }) {
   const node = useRef<HTMLDivElement>(null), map = useRef<LeafletMap | null>(null), marker = useRef<Marker | null>(null);
   const placeMarker = useRef<(point:Point)=>void>(()=>{});
   const revision = useRef(0), inputId = useId(), hintId = useId();
@@ -49,13 +49,18 @@ export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { 
       if (pointRef.current) place(pointRef.current);
     }).catch(() => setError("Карта не загрузилась. Попробуйте выбрать адрес через поиск."));
     return () => { disposed = true; map.current?.remove(); map.current = null; marker.current = null; placeMarker.current=()=>{}; };
-  }, [enabled, tileUrl, zone]);
+  }, [enabled, tileUrl, zone, !!quote]);
 
   useEffect(() => {
     if (point && map.current) { placeMarker.current(point); map.current.setView(point, 16); }
     else if (!point && marker.current) { marker.current.remove(); marker.current=null; }
   }, [point]);
-  useEffect(() => () => { revision.current++; }, []);
+  useEffect(() => () => { revision.current++; quoteCallback.current(null); }, []);
+  useEffect(() => {
+    if (!quote) return;
+    const timer = setTimeout(() => { invalidate(); setError("Расчёт устарел. Нажмите «Обновить стоимость доставки»."); }, Math.max(0, quote.expires - Date.now()));
+    return () => clearTimeout(timer);
+  }, [quote]);
 
   async function request(action: "search" | "quote", coordinates?: Point, currentAddress = address) {
     if (currentAddress.trim().length < 5) { setError("Введите улицу и номер дома."); return; }
@@ -78,7 +83,8 @@ export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { 
     else { setError("Найдена только улица. Номер дома сохранён в поле: отметьте нужный дом на карте и подтвердите адрес."); }
   }
   return <div className="address-picker" ref={setPopupContainer}>
-    <label htmlFor={inputId}>Улица и дом в Екатеринбурге *</label>
+    {quote ? <><div className="delivery-confirmed"><strong>{quote.address}</strong><span>Доставка — {formatPrice(quote.price)}</span><small>{quote.method === "road" ? "По дорогам" : "Оценка расстояния"}: {quote.distanceKm} км от магазина {quote.branch.address}</small>{quote.tariff && <small>База {formatPrice(quote.tariff.base)} · первые {quote.tariff.includedKm} км включены · далее {formatPrice(quote.tariff.perKm)}/км</small>}{quote.method !== "road" && <small>Расстояние по прямой × 1,28. Стоимость рассчитана по тарифу магазина.</small>}<Button type="button" variant="outline" onClick={()=>{invalidate();setEnabled(false);setPoint(null);setSelected(null);setResults([]);}}>Изменить адрес</Button></div>{children}</> : <>
+    <label htmlFor={inputId}>Улица и номер дома *</label>
     <Combobox items={results} filter={null} value={selected} inputValue={address} open={listOpen} onOpenChange={open => setListOpen(open && results.length > 0)} itemToStringLabel={result => result.label} isItemEqualToValue={(a, b) => a.label === b.label && a.coordinates.join() === b.coordinates.join()} onValueChange={choose} onInputValueChange={(value, details) => {
       if (details.reason !== "input-change" && details.reason !== "input-clear") return;
       invalidate(); setBusy(false); setSelected(null); setPoint(null); setResults([]); setListOpen(false); onAddress(value);
@@ -87,11 +93,11 @@ export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { 
       <ComboboxContent container={popupContainer} className="address-combobox"><ComboboxList>{(result: AddressResult) => <ComboboxItem key={result.label + result.coordinates.join()} value={result}>{result.label}{result.precision !== "house" && " — уточните дом на карте"}</ComboboxItem>}</ComboboxList></ComboboxContent>
     </Combobox>
     <Button type="button" variant="outline" disabled={busy || !addressReady} onClick={() => void request("search")}><Search />{busy ? "Проверяем адрес…" : "Найти адрес"}</Button>
-    <small>Нажмите «Найти адрес» и выберите дом из списка. Поиск получает только улицу и дом, без квартиры и телефона.</small>
+    <small>Город — Екатеринбург. Введите только улицу и дом, выберите результат. Квартиру и подъезд можно уточнить после выбора дома.</small>
     {!enabled ? <div className="map-consent"><p>Можно также отметить дом на карте OpenStreetMap.</p><Button type="button" variant="outline" onClick={() => setEnabled(true)}><MapPin />Показать карту</Button></div> : <><div ref={node} className="delivery-map" aria-label="Карта выбора дома" /><div className="map-actions"><small>Фиолетовая граница — зона доставки. Метку можно передвинуть.</small><Button type="button" variant="outline" onClick={() => map.current?.locate()}>Моё местоположение</Button></div></>}
     <p id={hintId} className="address-step-hint" aria-live="polite">{quote ? "Адрес выбран, доставка рассчитана." : !point ? "Выберите адрес из списка или отметьте дом на карте." : "Проверьте улицу, номер дома и положение метки, затем рассчитайте доставку."}</p>
-    {point && !quote && <Button type="button" disabled={busy || !addressReady} onClick={() => void request("quote", point)}>{busy ? "Рассчитываем…" : "Подтвердить адрес и рассчитать"}</Button>}
+    {point && !quote && <Button type="button" disabled={busy || !addressReady} onClick={() => void request("quote", point)}>{busy ? "Рассчитываем…" : "Обновить стоимость доставки"}</Button>}
     {error && <p role="alert" className="form-error">{error}</p>}
-    {quote && <div className="delivery-confirmed"><strong>Доставка {formatPrice(quote.price)}</strong><span>{quote.address}</span><span>{quote.distanceKm} км от «{quote.branch.name}»</span>{quote.method === "estimate" && <small>Предварительная оценка, не автомобильный маршрут.</small>}</div>}
+    </>}
   </div>;
 }

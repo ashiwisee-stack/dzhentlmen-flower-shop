@@ -58,7 +58,7 @@ async function signature(value:string) {
 }
 export async function quoteDelivery(address:string,point?:Coordinates) {
   const destination=point || (await findAddresses(address)).find(row=>row.precision === "house")?.coordinates;
-  if (!destination || destination.length!==2 || !destination.every(Number.isFinite)) throw new Error("Выберите адрес или точку доставки");
+  if (!destination || destination.length!==2 || !destination.every(Number.isFinite) || Math.abs(destination[0])>90 || Math.abs(destination[1])>180) throw new Error("Выберите адрес или точку доставки");
   const store=await readStoreData(),s={...DEFAULT_SETTINGS,...store.settings};
   if(!inZone(destination,s.deliveryZone)) throw new Error("Адрес находится за пределами зоны доставки");
   const candidates=await Promise.all(BRANCHES.map(async branch=>{
@@ -67,15 +67,15 @@ export async function quoteDelivery(address:string,point?:Coordinates) {
       const url=new URL("route/v1/driving/"+branch.coordinates.slice().reverse().join(",")+";"+destination.slice().reverse().join(","),String(env.ROUTER_URL).replace(/\/?$/,"/"));
       url.searchParams.set("overview","false");
       const res=await fetch(url,{signal:AbortSignal.timeout(8000)}),data=await res.json() as {code:string;routes?:{distance:number}[]};
-      if(!res.ok || data.code!=="Ok" || !data.routes?.length) throw new Error("Не удалось построить автомобильный маршрут");
+      if(!res.ok || data.code!=="Ok" || !data.routes?.length || !Number.isFinite(data.routes[0].distance) || data.routes[0].distance<0) throw new Error("Не удалось построить автомобильный маршрут");
       return {branch,km:data.routes[0].distance/1000};
     }
-    return {branch,km:Math.max(1,directKm(branch.coordinates,destination)*1.28)};
+    return {branch,km:directKm(branch.coordinates,destination)*1.28};
   }));
   const nearest=candidates.sort((a,b)=>a.km-b.km)[0];
   const distanceKm=Number(nearest.km.toFixed(1));
   const price=Math.round(s.deliveryBase+Math.max(0,distanceKm-s.deliveryIncludedKm)*s.deliveryPerKm);
-  const quote={address:address.trim(),coordinates:destination,distanceKm,price,branch:nearest.branch,method:s.deliveryMode==="road"?"road":"estimate",expires:Date.now()+15*60000};
+  const quote={address:address.trim(),coordinates:destination,distanceKm,price,branch:nearest.branch,method:s.deliveryMode==="road"?"road":"estimate",tariff:{base:s.deliveryBase,perKm:s.deliveryPerKm,includedKm:s.deliveryIncludedKm},expires:Date.now()+15*60000};
   const encoded=btoa(unescape(encodeURIComponent(JSON.stringify(quote))));
   return {...quote,token:encoded+"."+await signature(encoded)};
 }
@@ -86,5 +86,7 @@ export async function verifyQuote(token:string,address:string) {
   if(quote.expires<Date.now() || quote.address!==address.trim()) throw new Error("Расчёт доставки устарел. Рассчитайте заново.");
   const store=await readStoreData();
   if(!inZone(quote.coordinates,store.settings.deliveryZone as number[][])) throw new Error("Этот адрес больше не входит в зону доставки");
+  const s={...DEFAULT_SETTINGS,...store.settings};
+  if (!quote.tariff || quote.tariff.base!==s.deliveryBase || quote.tariff.perKm!==s.deliveryPerKm || quote.tariff.includedKm!==s.deliveryIncludedKm || quote.method!==(s.deliveryMode==="road"?"road":"estimate")) throw new Error("Тариф доставки изменился. Обновите стоимость доставки.");
   return quote;
 }
