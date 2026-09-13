@@ -57,6 +57,9 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     const variant=product.variants.find(v=>v.available);
     const date=new Date(Date.now()+3*86400000).toISOString().slice(0,10);
     const payload={requestKey:crypto.randomUUID(),accessToken:crypto.randomUUID(),customerName:'Анна',phone:'+79991234567',fulfillment:'pickup',branchId:'kraulya',deliveryDate:date,deliveryTime:'02:00',consent:true,offerAccepted:true,bonusSpend:0,expectedTotal:variant.price,items:[{productId:product.id,variantId:variant.id,quantity:1,extras:[]}]};
+    const unavailable=await decode(await api.orders.POST(request('/api/orders',{...payload,paymentMethod:'online'})));
+    assert.equal(unavailable.status,400,'unconfigured online payment must not silently switch to receipt');
+    assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM orders').get().n,0);
     let r=await decode(await api.orders.POST(request('/api/orders',payload)));assert.equal(r.status,201,JSON.stringify(r.body));
     const firstId=r.body.id;
     r=await decode(await api.orders.POST(request('/api/orders',payload)));assert.equal(r.body.id,firstId);assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM orders').get().n,1);
@@ -272,12 +275,22 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     assert.deepEqual(wrong.body.orders,[]);
     assert.equal((await decode(await api.paymentApi.POST(request('/api/payment',{id:guest.body.id})))).status,404);
     assert.equal((await decode(await api.paymentApi.POST(request('/api/payment',refs[0])))).status,200);
+    const receiptChoice=await decode(await api.orders.POST(request('/api/orders',{...guestPayload,requestKey:crypto.randomUUID(),paymentMethod:'on_receipt'})));
+    assert.equal(receiptChoice.status,201,JSON.stringify(receiptChoice.body));
+    assert.equal(receiptChoice.body.paymentRequired,false,'receipt choice remains receipt even with Robokassa enabled');
+    const receiptRow=sqlite.prepare('SELECT payment_status,robokassa_invoice_id,delivery_details FROM orders WHERE id=?').get(receiptChoice.body.id);
+    assert.equal(receiptRow.robokassa_invoice_id,null);
+    assert.equal(JSON.parse(receiptRow.delivery_details).paymentMethod,'on_receipt');
+    const onlineChoice=await decode(await api.orders.POST(request('/api/orders',{...guestPayload,requestKey:crypto.randomUUID(),paymentMethod:'online'})));
+    assert.equal(onlineChoice.status,201,JSON.stringify(onlineChoice.body));
+    assert.equal(onlineChoice.body.paymentRequired,true);
     // Both geocoders return selectable addresses in the configured delivery polygon.
     const externalFetch=globalThis.fetch;
     globalThis.fetch=async(input)=>{
       const u=new URL(String(input));
       if(u.hostname==='photon.komoot.io') {
-        assert.equal(u.searchParams.get('limit'),'8');assert.ok(u.searchParams.get('bbox'));
+        assert.equal(u.searchParams.get('limit'),'12');assert.ok(u.searchParams.get('bbox'));
+        assert.equal(u.pathname,'/structured');assert.equal(u.searchParams.get('housenumber'),'51');
         return Response.json({features:[{geometry:{coordinates:[60.60,56.83]},properties:{city:'Екатеринбург',street:'улица Малышева',housenumber:'51'}},{geometry:{coordinates:[37.6,55.7]},properties:{city:'Москва',street:'улица',housenumber:'1'}}]});
       }
       assert.equal(u.hostname,'geocoder.example.test');

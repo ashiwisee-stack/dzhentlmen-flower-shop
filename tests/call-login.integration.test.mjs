@@ -53,7 +53,7 @@ test('SMS.RU call login requires provider confirmation, browser binding and one-
         adds++;assert.match(options.body.get('phone'),/^7\d{10}$/);
         if(networkError)throw new Error('private-provider-error');
         if(providerError)return Response.json({status:'ERROR',status_code:201,status_text:'private-provider-error'});
-        return Response.json({status:'OK',status_code:100,check_id:'test-'+adds,call_phone:malformed?'javascript:alert(1)':'78005008275'});
+        return Response.json({status:'OK',status_code:100,check_id:'test-'+adds,call_phone:malformed?'javascript:alert(1)':'+78005008275'});
       }
       assert.equal(String(url),'https://sms.ru/callcheck/status');checks++;
       return Response.json({status:'OK',status_code:100,check_status:String(providerStatus)});

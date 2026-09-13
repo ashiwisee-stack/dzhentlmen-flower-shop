@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { normalizePhone } from "@/lib/phone";
 
 export function callcheckReady() {
   return env.SMS_RU_CALLCHECK_ENABLED === "1" && Boolean(env.SMS_RU_API_ID);
@@ -27,9 +28,9 @@ async function callcheck(action: "add" | "status", fields: Record<string, string
 
 export async function createCallcheck(phone: string) {
   const data = await callcheck("add", { phone: phone.replace(/\D/g, "") });
-  const checkId = String(data.check_id || ""), callPhone = String(data.call_phone || "");
-  if (!/^[\w-]{1,100}$/.test(checkId) || !/^7\d{10}$/.test(callPhone)) throw new Error("Сервис не вернул номер для звонка. Начните заново через пять минут.");
-  return { checkId, callPhone: "+" + callPhone };
+  const checkId = String(data.check_id || ""), callPhone = normalizePhone(String(data.call_phone || ""));
+  if (!/^[\w-]{1,100}$/.test(checkId) || !callPhone) throw new Error("Сервис не вернул номер для звонка. Начните заново через пять минут.");
+  return { checkId, callPhone };
 }
 
 export async function checkCallcheck(checkId: string): Promise<"pending" | "confirmed" | "expired"> {

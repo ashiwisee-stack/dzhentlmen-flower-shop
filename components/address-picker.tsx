@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Combobox, ComboboxContent, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/ui/combobox";
 import { MapPin, Search } from "lucide-react";
 import { BRANCHES, formatPrice } from "@/lib/catalog";
+import type { AddressResult } from "@/lib/address-results";
 type Point = [number, number];
-type AddressResult = { label: string; coordinates: Point };
 export type Quote = { coordinates:Point; price: number; distanceKm: number; branch: typeof BRANCHES[number]; method: string; token: string; address: string };
 
 export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { address: string; onAddress: (value: string) => void; onQuote: (quote: Quote | null) => void; tileUrl: string; zone: number[][] }) {
@@ -73,8 +73,9 @@ export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { 
   }
   function choose(result: AddressResult | null) {
     if (!result) return;
-    invalidate(); setSelected(result); onAddress(result.label); setPoint(result.coordinates); setListOpen(false); setEnabled(true);
-    void request("quote", result.coordinates, result.label);
+    invalidate(); setSelected(result); setPoint(result.coordinates); setListOpen(false); setEnabled(true);
+    if (result.precision === "house") { onAddress(result.label); void request("quote", result.coordinates, result.label); }
+    else { setError("Найдена только улица. Номер дома сохранён в поле: отметьте нужный дом на карте и подтвердите адрес."); }
   }
   return <div className="address-picker" ref={setPopupContainer}>
     <label htmlFor={inputId}>Улица и дом в Екатеринбурге *</label>
@@ -83,7 +84,7 @@ export function AddressPicker({ address, onAddress, onQuote, tileUrl, zone }: { 
       invalidate(); setBusy(false); setSelected(null); setPoint(null); setResults([]); setListOpen(false); onAddress(value);
     }}>
       <ComboboxInput id={inputId} required minLength={5} maxLength={300} autoComplete="street-address" aria-describedby={hintId} placeholder="Например, ул. Малышева, 51" showTrigger={results.length > 0} onKeyDown={event => { if (event.key === "Enter" && !listOpen) { event.preventDefault(); void request("search"); } }} />
-      <ComboboxContent container={popupContainer} className="address-combobox"><ComboboxList>{(result: AddressResult) => <ComboboxItem key={result.label + result.coordinates.join()} value={result}>{result.label}</ComboboxItem>}</ComboboxList></ComboboxContent>
+      <ComboboxContent container={popupContainer} className="address-combobox"><ComboboxList>{(result: AddressResult) => <ComboboxItem key={result.label + result.coordinates.join()} value={result}>{result.label}{result.precision !== "house" && " — уточните дом на карте"}</ComboboxItem>}</ComboboxList></ComboboxContent>
     </Combobox>
     <Button type="button" variant="outline" disabled={busy || !addressReady} onClick={() => void request("search")}><Search />{busy ? "Проверяем адрес…" : "Найти адрес"}</Button>
     <small>Нажмите «Найти адрес» и выберите дом из списка. Поиск получает только улицу и дом, без квартиры и телефона.</small>

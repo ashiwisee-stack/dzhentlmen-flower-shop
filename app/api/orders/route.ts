@@ -34,6 +34,10 @@ export async function POST(request:Request) {
     if(customerName.length<2 || customerName.length>100 || !phone || !["pickup","delivery"].includes(fulfillment)) throw new Error("Проверьте имя, телефон и способ получения");
     if(p.consent!==true) throw new Error("Подтвердите согласие на обработку данных");
     if(p.offerAccepted!==true) throw new Error("Примите публичную оферту");
+    const paymentMethod = p.paymentMethod ?? (paymentReady() ? "online" : "on_receipt");
+    if (!["online", "on_receipt"].includes(paymentMethod)) throw new Error("Выберите способ оплаты");
+    if (paymentMethod === "online" && !paymentReady()) throw new Error("Онлайн-оплата временно недоступна. Выберите оплату при получении.");
+    const onlinePayment = paymentMethod === "online";
     const catalog=await listProducts();
     const store=await readStoreData(),settings={...DEFAULT_SETTINGS,...store.settings};
     validateSlot(String(p.deliveryDate),String(p.deliveryTime),fulfillment,settings);
@@ -67,8 +71,9 @@ export async function POST(request:Request) {
     const recipientPhone=p.otherRecipient?normalizePhone(String(p.recipientPhone||"")):"";
     if(p.otherRecipient && (!recipientName || !recipientPhone)) throw new Error("Укажите имя и телефон получателя");
     const details={apartment:String(p.apartment||"").slice(0,30),entrance:String(p.entrance||"").slice(0,30),floor:String(p.floor||"").slice(0,10),intercom:String(p.intercom||"").slice(0,30),coordinates:quote?.coordinates,method:quote?.method,consentAt:new Date().toISOString(),consentVersion:CONSENT_VERSION,offerVersion:CONSENT_VERSION,paymentTest:paymentTest(),fiscal:fiscalSettings()};
-    const invoice=paymentReady()?String(BigInt("0x"+crypto.randomUUID().replaceAll("-","").slice(0,15))):null;
-    const paymentStatus=paymentReady()?"pending":"not_required";
+    Object.assign(details, { paymentMethod });
+    const invoice=onlinePayment?String(BigInt("0x"+crypto.randomUUID().replaceAll("-","").slice(0,15))):null;
+    const paymentStatus=onlinePayment?"pending":"not_required";
     const db=database();
     const insert=db.prepare("INSERT INTO orders(id,order_number,request_key,request_hash,access_hash,customer_id,customer_name,phone,recipient_name,recipient_phone,fulfillment,delivery_date,delivery_time,branch_id,address,comment,subtotal,delivery_price,bonus_spent,bonus_earned,total,payment_status,robokassa_invoice_id,delivery_details) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ?=0 OR EXISTS(SELECT 1 FROM bonus_operations WHERE id=? AND customer_id=?)").bind(
       id,orderNumber,requestKey,requestHash,await sha256(accessToken),customer?.id||null,customerName,phone,recipientName,recipientPhone,fulfillment,p.deliveryDate,p.deliveryTime,quote?.branch.id||p.branchId,fulfillment==="delivery"?address:"",String(p.comment||"").slice(0,2000),subtotal,deliveryPrice,bonusSpent,Math.floor((subtotal-bonusSpent)*settings.bonusPercent/100),total,paymentStatus,invoice,JSON.stringify(details),bonusSpent,"spend:"+id,customer?.id||null);
@@ -80,7 +85,7 @@ export async function POST(request:Request) {
       if(String(error).includes("INSUFFICIENT_BONUS")) throw new Error("Бонусы уже использованы в другом заказе. Обновите корзину.");
       throw error;
     }
-    return Response.json({orderNumber,total,id,paymentRequired:paymentReady()},{status:201});
+    return Response.json({orderNumber,total,id,paymentRequired:onlinePayment},{status:201});
   } catch(error) { console.error("order:create",error instanceof Error?error.name:"error"); return Response.json({error:error instanceof Error && !/D1_|SQLITE|constraint/i.test(error.message)?error.message:"Не удалось сохранить заказ. Данные не потеряны — попробуйте ещё раз."},{status:400}); }
 }
 export async function GET(request:Request) {
