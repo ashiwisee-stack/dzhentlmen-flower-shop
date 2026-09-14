@@ -1,3 +1,4 @@
+import { customerFetch } from "@/lib/customer-session-client";
 export type OrderReference = { id: string; accessToken?: string; orderNumber?: string; total?: number };
 const KEY = "dm_recent_orders";
 let memory: OrderReference[] = [];
@@ -24,7 +25,7 @@ export function rememberOrder(order: OrderReference) {
 
 export async function openOrderPayment(order: OrderReference) {
   rememberOrder(order);
-  const response = await fetch("/api/payment", {
+  const response = await customerFetch("/api/payment", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: order.id, accessToken: order.accessToken }), signal: AbortSignal.timeout(20000),
   });

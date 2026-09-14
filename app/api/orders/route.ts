@@ -8,6 +8,7 @@ import { getCustomer, normalizePhone, sha256 } from "@/lib/customer-auth";
 import { verifyQuote } from "@/lib/delivery";
 import { listProducts } from "@/lib/product-storage";
 import { readStoreData } from "@/lib/store-storage";
+import { normalizeOrderStatus,orderStatusLabel,ORDER_STATUSES } from "@/lib/order-status";
 import { canTransition, validateSlot } from "@/lib/shop-rules";
 import { limitRequest, sameOrigin } from "@/lib/security";
 import { CONSENT_VERSION } from "@/lib/consent";
@@ -46,12 +47,12 @@ export async function POST(request:Request) {
     if(!Array.isArray(p.items) || !p.items.length || p.items.length>50) throw new Error("Проверьте состав корзины");
     const resolved=p.items.map((i:{productId:number;variantId:string;quantity:number;extras:string[]})=>{
       const product=catalog.find(x=>x.id===Number(i.productId)),variant=product?.variants.find(x=>x.id===i.variantId);
-      if(!product?.available || product.hidden || !store.categories.some(c=>c.name===product.category && c.visible) || !variant?.available || !Number.isInteger(i.quantity) || i.quantity<1 || i.quantity>20) throw new Error("Один из товаров недоступен. Обновите корзину.");
-      if(!Array.isArray(i.extras) || i.extras.length>50) throw new Error("Слишком много дополнений");
+      if(!product?.available || product.hidden || !store.categories.some(c=>c.name===product.category && c.visible) || !variant?.available || !Number.isInteger(i.quantity) || i.quantity<1 || i.quantity>999) throw new Error("Один из товаров недоступен. Обновите корзину.");
+      if(!Array.isArray(i.extras) || i.extras.length>500) throw new Error("Слишком много дополнений");
       const selected=i.extras.map(id=>{
         const extra=extras.find(e=>e.id===id);
         if(!extra || extra.available===false) throw new Error("Одно из дополнений больше недоступно");
-        if(extra.kind==="flower" && product.acceptsFlowers===false) throw new Error("Цветы можно добавлять только к букетам и композициям");
+        if(extra.kind==="flower" && product.acceptsFlowers===false || extra.kind!=="flower" && product.showRecommendations===false) throw new Error("Для этого товара дополнения отключены");
         return extra;
       });
       return {product,variant,quantity:i.quantity,selected,price:variant.price+selected.reduce((sum,e)=>sum+e.price,0)};
@@ -93,9 +94,10 @@ export async function GET(request:Request) {
   const auth=await requireAdminApi();if(!auth.ok)return auth.response;
   const u=new URL(request.url),q=u.searchParams.get("q")||"",status=u.searchParams.get("status")||"",customerId=u.searchParams.get("customer")||"";
   const page=Math.max(0,Math.floor(Number(u.searchParams.get("page"))||0));
-  const rows=await getDb().select().from(orders).where(and(status?eq(orders.status,status):undefined,customerId?eq(orders.customerId,customerId):undefined,q?or(like(orders.phone,"%"+q+"%"),like(orders.orderNumber,"%"+q+"%")):undefined)).orderBy(desc(orders.createdAt)).limit(51).offset(page*50);
+  const rows=await getDb().select().from(orders).where(and(status?(normalizeOrderStatus(status)==="confirmed"?inArray(orders.status,["confirmed","assembling","ready"]):eq(orders.status,status)):undefined,u.searchParams.get("id")?eq(orders.id,u.searchParams.get("id")!):undefined,customerId?eq(orders.customerId,customerId):undefined,q?or(like(orders.phone,"%"+q+"%"),like(orders.orderNumber,"%"+q+"%")):undefined)).orderBy(desc(orders.createdAt)).limit(51).offset(page*50);
   const ids=rows.slice(0,50).map(o=>o.id),items=ids.length?await getDb().select().from(orderItems).where(inArray(orderItems.orderId,ids)):[];
-  return Response.json({hasMore:rows.length>50,orders:rows.slice(0,50).map(o=>({...o,accessHash:undefined,requestHash:undefined,requestKey:undefined,items:items.filter(i=>i.orderId===o.id)}))});
+  const custom=(await readStoreData()).settings.customOrderStatuses as string[] || [];
+  return Response.json({statuses:{...ORDER_STATUSES,...Object.fromEntries(custom.map(name=>["custom:"+name,name]))},hasMore:rows.length>50,orders:rows.slice(0,50).map(o=>({...o,accessHash:undefined,requestHash:undefined,requestKey:undefined,items:items.filter(i=>i.orderId===o.id)}))});
 }
 export async function PATCH(request:Request) {
   const auth=await requireAdminApi();if(!auth.ok)return auth.response;
@@ -103,17 +105,18 @@ export async function PATCH(request:Request) {
     sameOrigin(request); const p=await request.json();
     const [current]=await getDb().select().from(orders).where(eq(orders.id,String(p.id))).limit(1);
     if(!current) throw new Error("Заказ не найден");
-    const target=String(p.status||current.status);
+    const target=normalizeOrderStatus(String(p.status||current.status));
+    const custom=(await readStoreData()).settings.customOrderStatuses as string[] || [];
+    if(target.startsWith("custom:") && !custom.includes(target.slice(7)) && target!==current.status)throw new Error("Добавьте этот статус в настройки");
     if(!canTransition(current.status,target)) throw new Error("Такое изменение статуса недоступно");
-    if(target==="cancelled" && ["paid","refund_pending"].includes(current.paymentStatus)) throw new Error("Для оплаченного заказа сначала выполните возврат");
-    if(target==="completed" && !["paid","not_required"].includes(current.paymentStatus)) throw new Error("Сначала подтвердите оплату");
     let payment=current.paymentStatus;
     if(p.paymentStatus && p.paymentStatus!==payment) {
       if(current.robokassaInvoiceId || !["not_required","paid"].includes(p.paymentStatus)) throw new Error("Статус онлайн-оплаты меняется только по подтверждению Робокассы");
       payment=p.paymentStatus;
     }
+    if(p.paymentReceived===true && !current.robokassaInvoiceId && target==="completed" && current.paymentStatus==="not_required")payment="paid";
     const db=database();
-    const result=await db.batch([db.prepare("UPDATE orders SET status=?,payment_status=?,version=version+1 WHERE id=? AND version=? RETURNING id").bind(target,payment,current.id,Number(p.version)),db.prepare("INSERT OR IGNORE INTO notification_jobs(id,chat_id,message) SELECT ? || ':' || chat_id,chat_id,? FROM telegram_subscribers WHERE (role='admin' OR (role='customer' AND customer_id=?)) AND EXISTS(SELECT 1 FROM orders WHERE id=? AND version=? AND status=?)").bind("status:"+current.id+":"+target,"Заказ "+current.orderNumber+": "+target,current.customerId,current.id,Number(p.version)+1,target),...orderBonuses(current.id,current.customerId,target,Number(p.version)+1)]);
+    const result=await db.batch([db.prepare("UPDATE orders SET status=?,payment_status=?,version=version+1 WHERE id=? AND version=? RETURNING id").bind(target,payment,current.id,Number(p.version)),db.prepare("INSERT OR IGNORE INTO notification_jobs(id,chat_id,message) SELECT ? || ':' || chat_id,chat_id,? FROM telegram_subscribers WHERE (role='admin' OR (role='customer' AND customer_id=?)) AND EXISTS(SELECT 1 FROM orders WHERE id=? AND version=? AND status=?)").bind("status:"+current.id+":"+target+":"+(Number(p.version)+1),"Заказ "+current.orderNumber+": "+orderStatusLabel(target),current.customerId,current.id,Number(p.version)+1,target),...orderBonuses(current.id,current.customerId,target,Number(p.version)+1)]);
     if(!result[0].results.length) return Response.json({error:"Заказ уже изменился. Обновите список."},{status:409});
     if(target==="completed")try{await enqueueFinalReceipt(current.id);}catch{/* scheduled reconciliation will retry */}
     return Response.json({ok:true});

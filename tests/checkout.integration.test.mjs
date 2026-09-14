@@ -29,7 +29,7 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
   const dir=await mkdtemp(join(tmpdir(),'flower-api-tests-'));
   const api={};
   try {
-    for(const [name,path] of Object.entries({paymentApi:'app/api/payment/route.ts',editor:'lib/product-editor.ts',phone:'lib/phone.ts',recent:'lib/recent-orders.ts',uploads:'app/api/uploads/route.ts',bonuses:'lib/bonuses.ts',fiscal:'lib/fiscal.ts',refund:'app/api/payment/refund/route.ts',rules:'lib/shop-rules.ts',payments:'lib/payments.ts',store:'app/api/store/route.ts',auth:'app/api/auth/route.ts',orders:'app/api/orders/route.ts',delivery:'app/api/delivery/route.ts',admin:'app/api/admin/session/route.ts',settings:'app/api/admin/data/route.ts',products:'app/api/products/route.ts',result:'app/api/payment/result/route.ts',tgAuth:'app/api/auth/telegram/route.ts',tgWebhook:'app/api/telegram/webhook/route.ts',telegram:'lib/telegram.ts',deliveryLib:'lib/delivery.ts'})) {
+    for(const [name,path] of Object.entries({callAuth:'app/api/auth/call/route.ts',paymentApi:'app/api/payment/route.ts',editor:'lib/product-editor.ts',phone:'lib/phone.ts',recent:'lib/recent-orders.ts',uploads:'app/api/uploads/route.ts',bonuses:'lib/bonuses.ts',fiscal:'lib/fiscal.ts',refund:'app/api/payment/refund/route.ts',rules:'lib/shop-rules.ts',payments:'lib/payments.ts',store:'app/api/store/route.ts',auth:'app/api/auth/route.ts',orders:'app/api/orders/route.ts',delivery:'app/api/delivery/route.ts',admin:'app/api/admin/session/route.ts',settings:'app/api/admin/data/route.ts',products:'app/api/products/route.ts',result:'app/api/payment/result/route.ts',tgAuth:'app/api/auth/telegram/route.ts',tgWebhook:'app/api/telegram/webhook/route.ts',telegram:'lib/telegram.ts',deliveryLib:'lib/delivery.ts'})) {
       const out=join(dir,name+'.mjs');
       await build({entryPoints:[resolve(path)],outfile:out,bundle:true,platform:'node',format:'esm',logLevel:'silent',plugins:[{name:'test-runtime',setup(b){
         b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'env',namespace:'mock'}));
@@ -90,15 +90,16 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     const patch=async(status,version)=>decode(await api.orders.PATCH(request('/api/orders',{id:order.body.id,status,version})));
     assert.equal((await patch('cancelled',0)).status,200);
     assert.equal(sqlite.prepare('SELECT bonus_balance b FROM customers WHERE id=?').get(customerId).b,1000);
-    assert.equal((await patch('confirmed',1)).status,400,'cancelled orders cannot reopen');
-    assert.equal((await patch('cancelled',1)).status,200);
+    assert.equal((await patch('confirmed',1)).status,200,'cancelled orders can reopen');
+    assert.equal(sqlite.prepare('SELECT bonus_balance b FROM customers WHERE id=?').get(customerId).b,500,'reopening reserves spent bonuses again');
+    assert.equal((await patch('cancelled',2)).status,200);
     assert.equal(sqlite.prepare('SELECT bonus_balance b FROM customers WHERE id=?').get(customerId).b,1000,'no double refund');
     globalThis.__shopTestHeaders=new Headers({cookie:customerCookie});
     const earnedOrder=await decode(await api.orders.POST(request('/api/orders',{...bonusPayload,requestKey:crypto.randomUUID()})));
     assert.equal(earnedOrder.status,201);
     globalThis.__shopTestHeaders=new Headers({cookie:admin.response.headers.get('set-cookie').split(';')[0]});
     for(const [version,status] of ['confirmed','assembling','ready','completed'].entries()) {
-      const changed=await decode(await api.orders.PATCH(request('/api/orders',{id:earnedOrder.body.id,status,version})));
+      const changed=await decode(await api.orders.PATCH(request('/api/orders',{id:earnedOrder.body.id,status,version,paymentReceived:status==='completed'})));
       assert.equal(changed.status,200,JSON.stringify(changed.body));
     }
     const earned=Math.floor((variant.price-500)*.05);
@@ -106,6 +107,18 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     assert.equal((await decode(await api.orders.PATCH(request('/api/orders',{id:earnedOrder.body.id,status:'completed',version:4})))).status,200);
     assert.equal(sqlite.prepare('SELECT bonus_balance b FROM customers WHERE id=?').get(customerId).b,500+earned);
     assert.equal((await decode(await api.orders.PATCH(request('/api/orders',{id:earnedOrder.body.id,status:'completed',version:0})))).status,409);
+
+    // Direct reverse transitions reconcile rewards instead of awarding twice.
+    for(const [version,status,balance] of [[5,'new',500],[6,'completed',500+earned],[7,'cancelled',1000],[8,'completed',500+earned]]) {
+      const moved=await decode(await api.orders.PATCH(request('/api/orders',{id:earnedOrder.body.id,status,version})));
+      assert.equal(moved.status,200,JSON.stringify(moved.body));
+      assert.equal(sqlite.prepare('SELECT bonus_balance b FROM customers WHERE id=?').get(customerId).b,balance);
+    }
+    const custom=await decode(await api.settings.PATCH(request('/api/admin/data',{entity:'settings',values:{customOrderStatuses:['Передан курьеру']}})));
+    assert.equal(custom.status,200,JSON.stringify(custom.body));
+    assert.equal((await decode(await api.orders.PATCH(request('/api/orders',{id:order.body.id,status:'custom:Не настроен',version:3})))).status,400);
+    assert.equal((await decode(await api.orders.PATCH(request('/api/orders',{id:order.body.id,status:'custom:Передан курьеру',version:3})))).status,200);
+    assert.equal((await decode(await api.orders.PATCH(request('/api/orders',{id:order.body.id,status:'cancelled',version:4})))).status,200);
     const hidden=await decode(await api.products.PATCH(request('/api/products',{...product,hidden:true})));assert.equal(hidden.status,200,JSON.stringify(hidden.body));
     globalThis.__shopTestHeaders=new Headers();
     assert.equal((await decode(await api.orders.POST(request('/api/orders',{...payload,requestKey:crypto.randomUUID()})))).status,400,'hidden product rejected');
@@ -201,6 +214,20 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
       sqlite.prepare('UPDATE telegram_auth SET expires=0').run();
       await webhook({...message,text:'/start '+new URL(expired.body.url).searchParams.get('start')});
       assert.equal(sqlite.prepare('SELECT customer_id FROM telegram_auth').get().customer_id,null);
+      const tokenTgRequest=(body,challenge)=>new Request('http://localhost/api/auth/telegram',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json','x-auth-mode':'token',...(challenge?{'x-auth-challenge':challenge}:{})},body:JSON.stringify(body)});
+      const tokenStart=await decode(await api.tgAuth.POST(tokenTgRequest({action:'start',consent:true})));
+      assert.equal(tokenStart.status,200,JSON.stringify(tokenStart.body));
+      assert.equal(tokenStart.response.headers.get('set-cookie'),null);
+      assert.ok(tokenStart.body.challengeToken);
+      await webhook({...message,text:'/start '+new URL(tokenStart.body.url).searchParams.get('start')});
+      await webhook({...message,contact:{phone_number:payload.phone,user_id:10001}});
+      assert.equal((await api.tgAuth.POST(tokenTgRequest({action:'check'}))).status,400);
+      const tokenTgLogin=await decode(await api.tgAuth.POST(tokenTgRequest({action:'check'},tokenStart.body.challengeToken)));
+      assert.equal(tokenTgLogin.status,200,JSON.stringify(tokenTgLogin.body));
+      assert.equal(tokenTgLogin.response.headers.get('set-cookie'),null);
+      assert.ok(tokenTgLogin.body.authToken);
+      assert.equal((await api.tgAuth.POST(tokenTgRequest({action:'check'},tokenStart.body.challengeToken))).status,400);
+
     } finally {globalThis.fetch=previousFetch;delete globalThis.__shopTestEnv.TELEGRAM_BOT_TOKEN;}
     Object.assign(globalThis.__shopTestEnv,{ROBOKASSA_ENABLED:'1',ROBOKASSA_TEST:'1',ROBOKASSA_LOGIN:'test-shop',ROBOKASSA_PASSWORD1:'test-password-one',ROBOKASSA_PASSWORD2:'test-result-password',ROBOKASSA_HASH_ALGORITHM:'MD5'});
     assert.equal(api.payments.paymentReady(),true,'test payment does not need invented fiscal settings');
@@ -255,7 +282,7 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
       assert.equal((await decode(await api.refund.POST(request('/api/payment/refund',{id:firstId,action:'check'})))).status,200);
       assert.equal(sqlite.prepare('SELECT payment_status FROM orders WHERE id=?').get(firstId).payment_status,'refunded');
     } finally {globalThis.fetch=originalFetch;}
-    await DB.batch([DB.prepare("UPDATE orders SET status='cancelled' WHERE id=?").bind(earnedOrder.body.id),...api.bonuses.orderBonuses(earnedOrder.body.id,customerId,'cancelled')]);
+    await DB.batch([DB.prepare("UPDATE orders SET status='cancelled',version=version+1 WHERE id=?").bind(earnedOrder.body.id),...api.bonuses.orderBonuses(earnedOrder.body.id,customerId,'cancelled')]);
     assert.equal(sqlite.prepare('SELECT bonus_balance b FROM customers WHERE id=?').get(customerId).b,1000,'return spent points and revoke earned points together');
     await DB.batch(api.bonuses.orderBonuses(earnedOrder.body.id,customerId,'cancelled'));
     assert.equal(sqlite.prepare('SELECT bonus_balance b FROM customers WHERE id=?').get(customerId).b,1000);
@@ -283,6 +310,9 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     assert.equal(extra.price,275);
     assert.equal(fresh.body.settings.extras.filter(e=>e.kind==='flower').length,4);
     const updateSingle=async(values)=>decode(await api.products.PATCH(request('/api/products',{...single.body.product,pricingMode:'single',...values})));
+    const flags=await updateSingle({acceptsFlowers:true,showRecommendations:false});
+    assert.equal(flags.body.product.acceptsFlowers,true,'single items can explicitly allow additions');
+    assert.equal(flags.body.product.showRecommendations,false,'recommendation switch persists');
     assert.equal((await updateSingle({price:325})).status,200);
     fresh=await decode(await api.store.GET());
     assert.equal(fresh.body.settings.extras.find(e=>e.id===extra.id).price,325,'catalog change updates bouquet extras');
@@ -367,6 +397,55 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
       const latest=JSON.parse(storage.get('dm_payment'));assert.equal(latest.id,guest.body.id);
     } finally {delete globalThis.sessionStorage;delete globalThis.window;}
 
+
+    // Manual quantity 50 is accepted and priced on the server.
+    globalThis.__shopTestHeaders=new Headers();
+    const bulk=await decode(await api.orders.POST(request('/api/orders',{...guestPayload,requestKey:crypto.randomUUID(),paymentMethod:'on_receipt',expectedTotal:13750,items:[{productId:single.body.product.id,variantId:'one',quantity:50,extras:[]}]})));
+    assert.equal(bulk.status,201,JSON.stringify(bulk.body));
+    assert.equal(bulk.body.total,13750);
+
+    // CallCheck uses the same browser-bound one-time challenge without cookies.
+    const beforeCallFetch=globalThis.fetch;
+    Object.assign(globalThis.__shopTestEnv,{SMS_RU_CALLCHECK_ENABLED:'1',SMS_RU_API_ID:'fake-call-key'});
+    const callRequest=(body,challenge)=>new Request('http://localhost/api/auth/call',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json','x-auth-mode':'token',...(challenge?{'x-auth-challenge':challenge}:{})},body:JSON.stringify(body)});
+    globalThis.fetch=async(url)=>Response.json(String(url).endsWith('/add')?{status:'OK',status_code:100,check_id:'test-cookie-free',call_phone:'79990000000'}:{status:'OK',status_code:100,check_status:401});
+    try {
+      const call=await decode(await api.callAuth.POST(callRequest({action:'start',phone:'+79990001133',name:'Покупатель',consent:true})));
+      assert.equal(call.status,200,JSON.stringify(call.body));
+      assert.equal(call.response.headers.get('set-cookie'),null);
+      assert.ok(call.body.challengeToken);
+      assert.equal((await api.callAuth.POST(callRequest({action:'check'}))).status,400);
+      const callLogin=await decode(await api.callAuth.POST(callRequest({action:'check'},call.body.challengeToken)));
+      assert.equal(callLogin.status,200,JSON.stringify(callLogin.body));
+      assert.equal(callLogin.response.headers.get('set-cookie'),null);
+      assert.ok(callLogin.body.authToken);
+      assert.equal((await api.callAuth.POST(callRequest({action:'check'},call.body.challengeToken))).status,400);
+    } finally {globalThis.fetch=beforeCallFetch;delete globalThis.__shopTestEnv.SMS_RU_CALLCHECK_ENABLED;delete globalThis.__shopTestEnv.SMS_RU_API_ID;}
+    // Cookie-free sessions authenticate and revoke without ever setting cookies.
+    const tokenRequest=(body)=>new Request('http://localhost/api/auth',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json','x-auth-mode':'token'},body:JSON.stringify(body)});
+    const tokenPhone='+79990001122';
+    const tokenCode=await decode(await api.auth.POST(tokenRequest({action:'request-code',phone:tokenPhone,name:'Покупатель'})));
+    assert.equal(tokenCode.status,200,JSON.stringify(tokenCode.body));
+    const tokenLogin=await decode(await api.auth.POST(tokenRequest({action:'verify-code',phone:tokenPhone,code:tokenCode.body.devCode})));
+    assert.equal(tokenLogin.status,200,JSON.stringify(tokenLogin.body));
+    assert.equal(tokenLogin.response.headers.get('set-cookie'),null);
+    assert.ok(tokenLogin.body.authToken);
+    // Provider confirmation after issuing the order awards points exactly once.
+    sqlite.prepare("UPDATE orders SET customer_id=?,status='completed',version=version+1 WHERE id=?").run(tokenLogin.body.customer.id,onlineChoice.body.id);
+    const lateRow=sqlite.prepare('SELECT total,robokassa_invoice_id,bonus_earned FROM orders WHERE id=?').get(onlineChoice.body.id);
+    const lateSig=await api.payments.paymentHash(lateRow.total+'.00:'+lateRow.robokassa_invoice_id+':'+globalThis.__shopTestEnv.ROBOKASSA_PASSWORD2);
+    const lateCallback=()=>new Request('http://localhost/api/payment/result',{method:'POST',body:new URLSearchParams({OutSum:lateRow.total+'.00',InvId:lateRow.robokassa_invoice_id,SignatureValue:lateSig})});
+    assert.equal((await api.result.POST(lateCallback())).status,200);
+    assert.equal((await api.result.POST(lateCallback())).status,200);
+    assert.equal(sqlite.prepare('SELECT bonus_balance b FROM customers WHERE id=?').get(tokenLogin.body.customer.id).b,lateRow.bonus_earned);
+
+    globalThis.__shopTestHeaders=new Headers({'x-auth-mode':'token',authorization:'Bearer '+tokenLogin.body.authToken});
+    assert.equal((await decode(await api.auth.GET(new Request('http://localhost/api/auth')))).body.customer.phone,tokenPhone);
+    const logout=await api.auth.DELETE(new Request('http://localhost/api/auth',{method:'DELETE',headers:{origin:'http://localhost','x-auth-mode':'token'}}));
+    assert.equal(logout.headers.get('set-cookie'),null);
+    assert.equal((await decode(await api.auth.GET(new Request('http://localhost/api/auth')))).body.customer,null);
+    globalThis.__shopTestHeaders=new Headers({'x-auth-mode':'token',cookie:customerCookie});
+    assert.equal((await decode(await api.auth.GET(new Request('http://localhost/api/auth')))).body.customer,null,'declined cookies cannot authenticate through an old cookie');
     assert.equal(sqlite.prepare('PRAGMA foreign_key_check').all().length,0);
   } finally {sqlite.close();await rm(dir,{recursive:true,force:true});delete globalThis.__shopTestEnv;delete globalThis.__shopTestHeaders;}
 });

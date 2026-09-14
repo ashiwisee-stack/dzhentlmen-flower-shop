@@ -1,3 +1,4 @@
+import { tokenAuth,sessionToken } from "@/lib/auth-transport";
 import { desc, eq, inArray } from "drizzle-orm";
 import { headers } from "next/headers";
 import { database, getDb } from "@/db";
@@ -9,14 +10,14 @@ import { sendCode, smsDemo, smsReady } from "@/lib/sms";
 export async function GET(request: Request) {
   try {
     const customer = await getCustomer();
-    if (!customer) return Response.json({customer:null,orders:[],smsReady:smsReady() || smsDemo(request)});
+    if (!customer) return Response.json({customer:null,orders:[],smsReady:smsReady() || smsDemo(request)},{headers:{"cache-control":"no-store"}});
     const page = Math.max(0, Math.floor(Number(new URL(request.url).searchParams.get("page")) || 0));
     const db = getDb();
     const rows = await db.select().from(orders).where(eq(orders.customerId,customer.id)).orderBy(desc(orders.createdAt)).limit(21).offset(page*20);
     const ids = rows.slice(0,20).map(o=>o.id);
     const items = ids.length ? await db.select().from(orderItems).where(inArray(orderItems.orderId,ids)) : [];
     const ledger = await database().prepare("SELECT delta,kind,note,created_at FROM bonus_operations WHERE customer_id = ? ORDER BY created_at DESC LIMIT 50").bind(customer.id).all();
-    return Response.json({customer,hasMore:rows.length>20,ledger:ledger.results,orders:rows.slice(0,20).map(o=>({...o,accessHash:undefined,requestHash:undefined,requestKey:undefined,items:items.filter(i=>i.orderId===o.id)}))});
+    return Response.json({customer,hasMore:rows.length>20,ledger:ledger.results,orders:rows.slice(0,20).map(o=>({...o,accessHash:undefined,requestHash:undefined,requestKey:undefined,items:items.filter(i=>i.orderId===o.id)}))},{headers:{"cache-control":"no-store"}});
   } catch { return Response.json({error:"Не удалось загрузить личный кабинет"},{status:503}); }
 }
 export async function POST(request: Request) {
@@ -52,13 +53,12 @@ export async function POST(request: Request) {
     ]);
     if (!result[1].results.length) throw new Error("Неверный или истёкший код. Запросите новый, если пять попыток исчерпаны.");
     const [customer] = await getDb().select().from(customers).where(eq(customers.phone,phone));
-    return Response.json({customer},{headers:{"set-cookie":makeCustomerCookie(token,request)}});
+    return Response.json({customer,...(tokenAuth(request)?{authToken:token}:{})},{headers:tokenAuth(request)?{"cache-control":"no-store"}:{"set-cookie":makeCustomerCookie(token,request),"cache-control":"no-store"}});
   } catch(error) { return Response.json({error:error instanceof Error?error.message:"Не удалось войти"},{status:400}); }
 }
 export async function DELETE(request: Request) {
   sameOrigin(request);
-  const cookie = (await headers()).get("cookie") || "";
-  const token = cookie.split(";").map(x=>x.trim()).find(x=>x.startsWith("dm_customer="))?.slice(12);
+  const token=sessionToken(await headers());
   if (token) await database().prepare("DELETE FROM customer_sessions WHERE token_hash=?").bind(await sha256(token)).run();
-  return Response.json({ok:true},{headers:{"set-cookie":clearCustomerCookie()}});
+  return Response.json({ok:true},{headers:tokenAuth(request)?{"cache-control":"no-store"}:{"set-cookie":clearCustomerCookie(),"cache-control":"no-store"}});
 }

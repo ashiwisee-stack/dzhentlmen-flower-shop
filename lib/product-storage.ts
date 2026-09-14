@@ -22,6 +22,7 @@ export function rowToProduct(row: ProductRow): Product {
   return {
     id: row.id,
     acceptsFlowers:row.acceptsFlowers,
+    showRecommendations:row.showRecommendations,
     singleFlower:row.singleFlower,
     flowerExtraId:row.flowerExtraId ?? undefined,
     slug: row.slug,

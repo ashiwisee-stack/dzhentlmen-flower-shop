@@ -14,8 +14,8 @@ export function PaymentMethodPicker({value,onChange,ready,test}:{value:string;on
         <span className={styles.copy}><strong>При получении</strong><small>Оплатить при доставке или самовывозе</small></span>
       </label>
       <label htmlFor={id+"-online"} className={styles.option} data-selected={value==="online"} data-disabled={!ready}>
-        <span className={styles.top}><CreditCard aria-hidden="true"/><RadioGroupItem id={id+"-online"} value="online" disabled={!ready} aria-label="Робокасса онлайн"/></span>
-        <span className={styles.copy}><strong>Робокасса онлайн</strong><small>{!ready?"Временно недоступна":test?"Тестовый режим · без списания денег":"Оплатить на сайте после подтверждения"}</small></span>
+        <span className={styles.top}><CreditCard aria-hidden="true"/><RadioGroupItem id={id+"-online"} value="online" disabled={!ready} aria-label="Оплата онлайн"/></span>
+        <span className={styles.copy}><strong>Оплата онлайн</strong><small>{!ready?"Временно недоступна":test?"Тестовый режим · без списания денег":"Оплатить на сайте после подтверждения"}</small></span>
       </label>
     </RadioGroup>
   </fieldset>;

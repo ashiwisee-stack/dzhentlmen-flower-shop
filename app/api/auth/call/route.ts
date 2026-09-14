@@ -1,3 +1,4 @@
+import { tokenAuth,challengeToken } from "@/lib/auth-transport";
 import { env } from "cloudflare:workers";
 import { database } from "@/db";
 import { makeCustomerCookie, normalizePhone, sha256 } from "@/lib/customer-auth";
@@ -25,12 +26,12 @@ export async function POST(request: Request) {
     if (!["start", "current", "check", "cancel"].includes(p.action || "")) throw new Error("Неизвестное действие");
     await limitRequest(request, "call-requests", 180, 600);
     const db = database(), now = Date.now();
-    const raw = request.headers.get("cookie")?.split(";").map(s => s.trim()).find(s => s.startsWith(COOKIE + "="))?.slice(COOKIE.length + 1) || "";
+    const raw=challengeToken(request,COOKIE);
     const hash = raw ? await sha256(raw) : "";
     const existing = hash ? await db.prepare("SELECT * FROM call_auth WHERE browser_hash=? AND expires>?").bind(hash, now).first<Challenge>() : null;
     if (p.action === "cancel") {
       if (hash) await db.prepare("DELETE FROM call_auth WHERE browser_hash=?").bind(hash).run();
-      return json({ ok: true }, 200, { "set-cookie": cookie("", request, true) });
+      return json({ok:true,clearChallenge:true},200,tokenAuth(request)?{}:{"set-cookie":cookie("",request,true)});
     }
     if (p.action === "current") return json({ ready: callcheckReady(), challenge: callcheckReady() && existing?.call_phone ? publicChallenge(existing).challenge : null });
     if (!callcheckReady()) throw new Error("Вход по звонку пока не подключён. Можно войти через Telegram.");
@@ -66,9 +67,9 @@ export async function POST(request: Request) {
         const result = await createCallcheck(phone);
         const saved = await db.prepare("UPDATE call_auth SET check_id=?,call_phone=? WHERE browser_hash=? AND expires>? RETURNING browser_hash").bind(result.checkId, result.callPhone, browserHash, Date.now()).first();
         if (!saved) throw new Error("Время попытки истекло. Начните вход заново.");
-        return json({ ready: true, challenge: { phone, callPhone: result.callPhone, expires } }, 200, { "set-cookie": cookie(browser, request) });
+        return json({ready:true,challenge:{phone,callPhone:result.callPhone,expires},...(tokenAuth(request)?{challengeToken:browser}:{})},200,tokenAuth(request)?{}:{"set-cookie":cookie(browser,request)});
       } catch (error) {
-        return json({ error: error instanceof Error ? error.message : "Не удалось создать попытку входа" }, 400, { "set-cookie": cookie(browser, request) });
+        return json({error:error instanceof Error?error.message:"Не удалось создать попытку входа",...(tokenAuth(request)?{challengeToken:browser}:{})},400,tokenAuth(request)?{}:{"set-cookie":cookie(browser,request)});
       }
     }
 
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
     if (status === "pending") return json({ pending: true, retryAfter: 15 });
     if (status === "expired") {
       await db.prepare("DELETE FROM call_auth WHERE browser_hash=?").bind(hash).run();
-      return json({ expired: true, error: "Время на звонок истекло. Начните вход заново." }, 400, { "set-cookie": cookie("", request, true) });
+      return json({ expired: true, error: "Время на звонок истекло. Начните вход заново." }, 400, tokenAuth(request)?{}:{ "set-cookie": cookie("", request, true) });
     }
     const session = crypto.randomUUID() + crypto.randomUUID(), completedAt = Date.now();
     const condition = "browser_hash=? AND check_id=? AND expires>?";
@@ -91,8 +92,8 @@ export async function POST(request: Request) {
       db.prepare(`DELETE FROM call_auth WHERE ${condition}`).bind(...args),
     ]);
     if (!result[2].results.length) throw new Error("Попытка уже завершена или отменена. Обновите страницу.");
-    const h = new Headers(); h.append("set-cookie", makeCustomerCookie(session, request)); h.append("set-cookie", cookie("", request, true));
-    return json({ ok: true }, 200, h);
+    const h=new Headers();if(!tokenAuth(request)){h.append("set-cookie",makeCustomerCookie(session,request));h.append("set-cookie",cookie("",request,true));}
+    return json({ok:true,clearChallenge:true,...(tokenAuth(request)?{authToken:session}:{})},200,h);
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Не удалось войти" }, 400);
   }

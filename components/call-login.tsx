@@ -1,4 +1,6 @@
 "use client";
+import { customerFetch } from "@/lib/customer-session-client";
+
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Phone, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,7 +8,7 @@ import { PhoneInput } from "@/components/phone-input";
 
 type Challenge = { phone: string; callPhone: string; expires: number };
 async function send(body: Record<string, unknown>) {
-  const response = await fetch("/api/auth/call", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
+  const response = await customerFetch("/api/auth/call", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
   const data = await response.json();
   return { response, data };
 }

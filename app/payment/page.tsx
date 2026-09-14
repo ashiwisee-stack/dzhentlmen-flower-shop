@@ -1,4 +1,6 @@
 "use client";
+import { customerFetch } from "@/lib/customer-session-client";
+
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Toaster } from "@/components/ui/sonner";
@@ -20,7 +22,7 @@ export default function PaymentPage() {
       try { saved = JSON.parse(sessionStorage.getItem("dm_payment") || "null"); } catch {}
       saved ||= recentOrders()[0] || null;
       if (!saved) { setMessage("Выберите заказ в личном кабинете или уточните статус у магазина."); return; }
-      const response = await fetch("/api/payment", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...saved, action: "status" }), signal: AbortSignal.timeout(15000) });
+      const response = await customerFetch("/api/payment", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...saved, action: "status" }), signal: AbortSignal.timeout(15000) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось проверить статус");
       setPending(data.paymentStatus === "pending" && data.status !== "cancelled" ? saved : null);
