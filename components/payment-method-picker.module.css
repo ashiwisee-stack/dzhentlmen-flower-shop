@@ -1,0 +1,14 @@
+.fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.fieldset legend { margin-bottom: 10px; font-size: 1rem; font-weight: 600; }
+.fieldset .options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fieldset .option { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin: 0; padding: 16px; border: 2px solid #ddd2e1; border-radius: 16px; background: #fff; cursor: pointer; transition: border-color .15s, background-color .15s; }
+.fieldset .option[data-selected="true"] { border-color: #542565; background: #f5edf8; }
+.fieldset .option:has(:focus-visible) { outline: 3px solid #9867ad; outline-offset: 3px; }
+.fieldset .option[data-disabled="true"] { cursor: not-allowed; background: #f5f3f5; color: #756b79; }
+.fieldset .top { display: flex; justify-content: space-between; align-items: center; color: #542565; }
+.top > svg { width: 24px; height: 24px; }
+.fieldset .copy { display: grid; gap: 6px; }
+.fieldset .copy strong { color: #301b39; font-size: 1rem; line-height: 1.35; overflow-wrap: anywhere; }
+.fieldset .copy small { color: #695c70; font-size: .875rem; font-weight: 400; line-height: 1.45; }
+@media (max-width: 400px) { .fieldset .options { gap: 8px; } .fieldset .option { padding: 12px; } }
+@media (prefers-reduced-motion: reduce) { .fieldset .option { transition: none; } }
