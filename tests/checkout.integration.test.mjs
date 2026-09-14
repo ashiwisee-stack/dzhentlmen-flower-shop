@@ -296,6 +296,9 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     assert.equal(extra.price,275);
     assert.equal(fresh.body.settings.extras.filter(e=>e.kind==='flower').length,4);
     const updateSingle=async(values)=>decode(await api.products.PATCH(request('/api/products',{...single.body.product,pricingMode:'single',...values})));
+    const flags=await updateSingle({acceptsFlowers:true,showRecommendations:false});
+    assert.equal(flags.body.product.acceptsFlowers,true,'single items can explicitly allow additions');
+    assert.equal(flags.body.product.showRecommendations,false,'recommendation switch persists');
     assert.equal((await updateSingle({price:325})).status,200);
     fresh=await decode(await api.store.GET());
     assert.equal(fresh.body.settings.extras.find(e=>e.id===extra.id).price,325,'catalog change updates bouquet extras');

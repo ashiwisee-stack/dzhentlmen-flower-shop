@@ -18,7 +18,7 @@ async function result(request:Request) {
     if(!order || Number(sum)!==order.total) return new Response("Invalid amount",{status:400});
     if(order.payment_status==="pending") await db.batch([
       db.prepare("UPDATE orders SET payment_status='paid',version=version+1 WHERE id=? AND payment_status='pending'").bind(order.id),
-      ...orderBonuses(order.id,order.customer_id,order.status),
+      ...orderBonuses(order.id,order.customer_id,null),
       notificationStatement("paid:"+order.id,"Оплата заказа "+order.order_number+" подтверждена.",order.customer_id),
     ]);
     return new Response("OK"+invoice);

@@ -45,7 +45,7 @@ function normalizeProduct(payload: Partial<Product> & { pricingMode?: "single" |
     name,
     category,
     singleFlower:payload.singleFlower===true,
-    acceptsFlowers:payload.acceptsFlowers!==false,
+    acceptsFlowers:payload.acceptsFlowers ?? payload.singleFlower!==true,
     showRecommendations:payload.showRecommendations!==false,
     price: availablePrices.length ? Math.min(...availablePrices) : Math.min(...variants.map((item) => item.price)),
     oldPrice: payload.oldPrice ? Number(payload.oldPrice) : null,
