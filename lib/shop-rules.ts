@@ -1,3 +1,4 @@
+import { normalizeOrderStatus, validOrderStatus } from "@/lib/order-status";
 export function validateSlot(date: string, time: string, fulfillment: string, settings: {leadTimeHours:number;deliveryOpen:string;deliveryClose:string}, now = Date.now()) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("Выберите корректные дату и время");
   const instant = Date.parse(`${date}T${time}:00+05:00`);
@@ -11,7 +12,4 @@ export function validateSlot(date: string, time: string, fulfillment: string, se
     if (!allowed) throw new Error(`Доставка доступна ${settings.deliveryOpen}–${settings.deliveryClose}`);
   }
 }
-export function canTransition(from: string, to: string) {
-  const transitions: Record<string,string[]> = {new:["confirmed","cancelled"],confirmed:["assembling","cancelled"],assembling:["ready","cancelled"],ready:["completed","cancelled"],completed:[],cancelled:[]};
-  return from === to || !!transitions[from]?.includes(to);
-}
+export function canTransition(from:string,to:string){return validOrderStatus(normalizeOrderStatus(from)) && validOrderStatus(normalizeOrderStatus(to));}

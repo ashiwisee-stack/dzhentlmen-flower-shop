@@ -2,6 +2,7 @@ export type ProductVariant = { id: string; name: string; price: number; availabl
 
 export type Product = {
   acceptsFlowers?: boolean;
+  showRecommendations?: boolean;
   singleFlower?: boolean;
   flowerExtraId?: string;
   id: number;
@@ -56,6 +57,7 @@ export const BRANCHES: Branch[] = [
 ];
 
 export const DEFAULT_SETTINGS = {
+  customOrderStatuses: [] as string[],
   legalName: "Индивидуальный предприниматель Аббасалиева Айтадж Савадхан кызы", inn: "665814896100", ogrnip: "325665800130472", legalAddress: "", contactEmail: "abbasalieva.aytadzh@mail.ru",
   bankAccount:"40802810416750014015", bankName:"УРАЛЬСКИЙ БАНК ПАО СБЕРБАНК", bankBik:"046577674", bankCorrespondent:"30101810500000000674", bankInn:"7707083893", bankKpp:"665843001",
   demoCatalog: true,

@@ -1,4 +1,6 @@
 "use client";
+import { customerFetch } from "@/lib/customer-session-client";
+
 import { useState } from "react";
 import { Send,Check,Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,7 +10,7 @@ export function TelegramLogin({onLogin}:{onLogin:()=>Promise<void>}) {
   async function action(kind:"start"|"check"|"cancel") {
     setLoading(true);setError("");
     try {
-      const r=await fetch("/api/auth/telegram",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:kind,consent})}),d=await r.json();
+      const r=await customerFetch("/api/auth/telegram",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:kind,consent})}),d=await r.json();
       if(!r.ok)throw new Error(d.error);
       if(kind==="start")setChallenge(d);
       else if(kind==="cancel")setChallenge(null);

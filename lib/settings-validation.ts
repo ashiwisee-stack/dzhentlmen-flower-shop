@@ -1,5 +1,6 @@
 import { z } from "zod";
 export const settingsSchema=z.object({
+  customOrderStatuses:z.array(z.string().trim().min(1).max(40).regex(/^[^<>\r\n]+$/)).max(8).default([]).refine(a=>new Set(a).size===a.length,"Повторяются статусы"),
   minOrder:z.number().int().min(0).max(1000000),
   deliveryBase:z.number().int().min(0).max(100000),
   deliveryPerKm:z.number().min(0).max(10000),

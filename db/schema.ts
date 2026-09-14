@@ -12,6 +12,7 @@ export const categories = sqliteTable("categories", {
 export const products = sqliteTable("products", {
   singleFlower: integer("single_flower", { mode: "boolean" }).notNull().default(false),
   flowerExtraId: text("flower_extra_id"),
+  showRecommendations: integer("show_recommendations", {mode:"boolean"}).notNull().default(true),
   acceptsFlowers: integer("accepts_flowers", {mode:"boolean"}).notNull().default(true),
   id: integer("id").primaryKey({ autoIncrement: true }),
   slug: text("slug").notNull().unique(),

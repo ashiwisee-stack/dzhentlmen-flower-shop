@@ -1,3 +1,4 @@
+import { sessionToken } from "@/lib/auth-transport";
 import { env } from "cloudflare:workers";
 import { and, eq, gt } from "drizzle-orm";
 import { headers } from "next/headers";
@@ -20,7 +21,7 @@ function cookieValue(raw: string | null, key: string) {
 
 export async function getCustomer() {
   const requestHeaders = await headers();
-  const token = cookieValue(requestHeaders.get("cookie"), COOKIE);
+  const token = sessionToken(requestHeaders);
   if (!token) return null;
   const tokenHash = await sha256(token);
   const db = getDb();

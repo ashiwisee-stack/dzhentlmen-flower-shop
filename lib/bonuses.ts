@@ -15,17 +15,18 @@ export function spendBonuses(customerId:string,orderId:string,amount:number,note
   return [db.prepare("INSERT INTO bonus_operations(id,customer_id,delta,kind,note) SELECT ?,id,?,'spend',? FROM customers WHERE id=? AND bonus_balance>=?").bind("spend:"+orderId,-amount,note,customerId,amount),...settleBonuses(customerId)];
 }
 
+// Reconcile the desired ledger total on every transition, including reopening.
+// The optimistic order version and ledger insertion are in the same D1 batch.
 export function orderBonuses(orderId:string,customerId:string|null,status:string,version:number|null=null) {
-  if(!customerId || !["completed","cancelled"].includes(status))return [];
-  const db=database();
-  const condition="id=? AND customer_id=? AND status=? AND (? IS NULL OR version=?)";
-  const bindings=[orderId,customerId,status,version,version];
-  const operations=status==="completed"?[
-    db.prepare("INSERT OR IGNORE INTO bonus_operations(id,customer_id,delta,kind,note) SELECT 'earn:'||id,customer_id,bonus_earned,'earn',order_number FROM orders WHERE "+condition).bind(...bindings),
-    db.prepare("UPDATE orders SET bonus_awarded=1 WHERE "+condition).bind(...bindings),
-  ]:[
-    db.prepare("INSERT OR IGNORE INTO bonus_operations(id,customer_id,delta,kind,note) SELECT 'return:'||id,customer_id,bonus_spent,'return',order_number FROM orders WHERE "+condition).bind(...bindings),
-    db.prepare("INSERT OR IGNORE INTO bonus_operations(id,customer_id,delta,kind,note) SELECT 'revoke:'||id,customer_id,-(SELECT delta FROM bonus_operations WHERE id='earn:'||orders.id),'revoke',order_number FROM orders WHERE "+condition+" AND EXISTS(SELECT 1 FROM bonus_operations WHERE id='earn:'||orders.id)").bind(...bindings),
-  ];
-  return [...operations,...settleBonuses(customerId)];
+ if(!customerId)return [];
+ const db=database();
+ const where="id=? AND customer_id=? AND status=? AND (? IS NULL OR version=?)";
+ const target="CASE WHEN status='cancelled' THEN bonus_spent WHEN status='completed' AND payment_status='paid' THEN bonus_earned ELSE 0 END";
+ const previous="COALESCE((SELECT SUM(delta) FROM bonus_operations WHERE customer_id=orders.customer_id AND (id IN ('earn:'||orders.id,'return:'||orders.id,'revoke:'||orders.id) OR id LIKE 'adjust:'||orders.id||':%')),0)";
+ const args=[orderId,customerId,status,version,version];
+ return [
+ db.prepare("INSERT OR IGNORE INTO bonus_operations(id,customer_id,delta,kind,note) SELECT 'adjust:'||id||':'||version,customer_id,("+target+")-("+previous+"),'status',order_number FROM orders WHERE "+where).bind(...args),
+ db.prepare("UPDATE orders SET bonus_awarded=CASE WHEN status='completed' AND payment_status='paid' THEN 1 ELSE 0 END WHERE "+where).bind(...args),
+ ...settleBonuses(customerId)
+ ];
 }

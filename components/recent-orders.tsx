@@ -1,4 +1,7 @@
 "use client";
+import { orderStatusLabel } from "@/lib/order-status";
+import { customerFetch } from "@/lib/customer-session-client";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -7,7 +10,6 @@ import { formatPrice } from "@/lib/catalog";
 import { openOrderPayment, recentOrders, type OrderReference } from "@/lib/recent-orders";
 
 type SavedOrder = OrderReference & { status?: string; paymentStatus?: string; deliveryDate?: string; deliveryTime?: string; test?: boolean; unavailable?: boolean };
-const states: Record<string, string> = { new: "Новый", confirmed: "Подтверждён", assembling: "Собираем", ready: "Готов", completed: "Выполнен", cancelled: "Отменён" };
 const payments: Record<string, string> = { pending: "Ожидает оплаты", paid: "Оплачен", not_required: "Оплата при получении", refund_pending: "Возврат обрабатывается", refunded: "Средства возвращены" };
 
 export function RecentOrders({ initiallyOpen = false }: { initiallyOpen?: boolean }) {
@@ -22,7 +24,7 @@ export function RecentOrders({ initiallyOpen = false }: { initiallyOpen?: boolea
     if (!refs.length) return;
     setOrders(current => refs.map(ref => ({ ...current.find(order => order.id === ref.id), ...ref })));
     try {
-      const response = await fetch("/api/payment", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list", orders: refs.map(({ id, accessToken }) => ({ id, accessToken })) }), signal: AbortSignal.timeout(15000) });
+      const response = await customerFetch("/api/payment", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "list", orders: refs.map(({ id, accessToken }) => ({ id, accessToken })) }), signal: AbortSignal.timeout(15000) });
       const data = await response.json();
       if (requestRevision !== revision.current) return;
       if (!response.ok) throw new Error(data.error || "Не удалось обновить статусы");
@@ -49,7 +51,7 @@ export function RecentOrders({ initiallyOpen = false }: { initiallyOpen?: boolea
       <Button variant="outline" onClick={() => void refresh()}>Обновить статусы</Button>
       {error && <p role="alert" className="form-error">{error}. Сохранённые номера заказов остаются ниже.</p>}
       <div className="recent-orders-list">{orders.map(order => <article key={order.id}><div><strong>{order.orderNumber || "Заказ"}</strong>{order.total !== undefined && <strong>{formatPrice(order.total)}</strong>}</div>
-        <p>{order.unavailable ? "Для этого заказа войдите в свой аккаунт или уточните статус у магазина." : states[order.status || ""] || "Получаем статус…"}</p>
+        <p>{order.unavailable ? "Для этого заказа войдите в свой аккаунт или уточните статус у магазина." : order.status ? orderStatusLabel(order.status) : "Получаем статус…"}</p>
         {order.paymentStatus && <p>{payments[order.paymentStatus] || order.paymentStatus}</p>}
         {order.deliveryDate && <p>{order.deliveryDate} · {order.deliveryTime} (Екатеринбург)</p>}
         {order.test && <small>Тестовый платёж: деньги не списываются.</small>}
