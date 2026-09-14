@@ -145,6 +145,31 @@ test('checkout, auth, bonuses and payment callbacks preserve their invariants', 
     assert.equal(diagnostics.status,200);assert.ok(diagnostics.body.paymentSetup.missing.includes('ROBOKASSA_PASSWORD1'));
     assert.equal(JSON.stringify(diagnostics.body.paymentSetup).includes('test-admin-password'),false);
     globalThis.__shopTestHeaders=new Headers();
+    // Road prices use a single directional matrix, not a straight-line fallback.
+    sqlite.prepare("INSERT INTO store_settings(key,value) VALUES('deliveryMode','\"road\"') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run();
+    globalThis.__shopTestEnv.ROUTER_URL='https://router.example.test/';
+    const routeFetch=globalThis.fetch;let routeCalls=0;
+    globalThis.fetch=async(input)=>{
+      routeCalls++;const url=new URL(input);
+      assert.match(url.pathname,/table\/v1\/driving/);
+      assert.equal(url.searchParams.get('sources'),'0;1');assert.equal(url.searchParams.get('destinations'),'2');
+      assert.equal(url.searchParams.get('annotations'),'distance');
+      return Response.json({code:'Ok',distances:[[6748.9],[3863.4]]});
+    };
+    try {
+      const road=await api.deliveryLib.quoteDelivery('Публичная точка',[56.8368,60.6122]);
+      assert.equal(routeCalls,1);assert.equal(road.method,'road');assert.equal(road.branch.id,'tokarey');assert.equal(road.distanceKm,3.9);assert.equal(road.price,95);
+      globalThis.fetch=async()=>Response.json({code:'Ok',distances:[[null],[2100]]});
+      assert.equal((await api.deliveryLib.quoteDelivery('Публичная точка',[56.8368,60.6122])).price,5);
+      globalThis.fetch=async()=>Response.json({code:'Ok',distances:[[null],[null]]});
+      await assert.rejects(api.deliveryLib.quoteDelivery('Публичная точка',[56.8368,60.6122]),/маршрут/);
+      globalThis.fetch=async()=>{throw new Error('timeout')};
+      await assert.rejects(api.deliveryLib.quoteDelivery('Публичная точка',[56.8368,60.6122]),/маршрут/);
+      globalThis.__shopTestEnv.ROUTER_URL='https://routing.openstreetmap.de/routed-car/';
+      globalThis.fetch=async()=>Response.json({code:'Ok',distances:[[6748.9],[3863.4]]});
+      await api.deliveryLib.quoteDelivery('Публичная точка',[56.8368,60.6122]);
+      await assert.rejects(api.deliveryLib.quoteDelivery('Другая точка',[56.837,60.613]),/пару секунд/);
+    } finally {globalThis.fetch=routeFetch;delete globalThis.__shopTestEnv.ROUTER_URL;sqlite.prepare("UPDATE store_settings SET value='\"estimate\"' WHERE key='deliveryMode'").run();}
     // Telegram: own contact, browser binding, expiry and one-time consumption.
     Object.assign(globalThis.__shopTestEnv,{TELEGRAM_BOT_TOKEN:'fake-token',TELEGRAM_BOT_USERNAME:'test_bot',PUBLIC_ORIGIN:'https://shop.example.test'});
     const previousFetch=globalThis.fetch;

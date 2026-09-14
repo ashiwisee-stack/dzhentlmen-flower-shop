@@ -9,7 +9,15 @@ export async function GET() {
   const admin = await getAdminIdentity();
   if (!admin) return Response.json({ready:telegramReady()});
   const subscribers = await database().prepare("SELECT chat_id,name FROM telegram_subscribers WHERE role='admin'").all();
-  return Response.json({ready:telegramReady(),subscribers:subscribers.results});
+  let webhook=null;
+  if(telegramReady()) {
+    try {
+      const info=await telegramCall("getWebhookInfo",{});
+      const expected=new URL("/api/telegram/webhook",String(env.PUBLIC_ORIGIN)).href;
+      webhook={connected:info.url===expected,url:info.url,pending:info.pending_update_count,lastError:info.last_error_message||null};
+    } catch {webhook={connected:false,lastError:"Не удалось проверить связь с Telegram"};}
+  }
+  return Response.json({ready:telegramReady(),username:env.TELEGRAM_BOT_USERNAME||null,webhook,subscribers:subscribers.results},{headers:{"cache-control":"no-store"}});
 }
 export async function POST(request:Request) {
   try {
@@ -21,6 +29,7 @@ export async function POST(request:Request) {
     if (!telegramReady()) throw new Error("Добавьте токен Telegram и адрес сайта в настройках сервера");
     if (p.action==="retry" && admin) { await flushNotifications(); return Response.json({ok:true}); }
     if (admin) await telegramCall("setWebhook",{url:new URL("/api/telegram/webhook",String(env.PUBLIC_ORIGIN)).href,secret_token:await webhookSecret(),allowed_updates:["message"]});
+    if(p.action==="setup" && admin) return Response.json({ok:true});
     const bot=await telegramCall("getMe",{});
     const token=crypto.randomUUID().replaceAll("-","");
     await database().prepare("DELETE FROM telegram_links WHERE expires<?").bind(Date.now()).run();

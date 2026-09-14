@@ -1,3 +1,4 @@
+import { roadDistances } from "@/lib/road-routing";
 import { env } from "cloudflare:workers";
 import { BRANCHES, DEFAULT_SETTINGS } from "@/lib/catalog";
 import { readStoreData } from "@/lib/store-storage";
@@ -61,17 +62,9 @@ export async function quoteDelivery(address:string,point?:Coordinates) {
   if (!destination || destination.length!==2 || !destination.every(Number.isFinite) || Math.abs(destination[0])>90 || Math.abs(destination[1])>180) throw new Error("Выберите адрес или точку доставки");
   const store=await readStoreData(),s={...DEFAULT_SETTINGS,...store.settings};
   if(!inZone(destination,s.deliveryZone)) throw new Error("Адрес находится за пределами зоны доставки");
-  const candidates=await Promise.all(BRANCHES.map(async branch=>{
-    if(s.deliveryMode==="road") {
-      if(!env.ROUTER_URL) throw new Error("Расчёт по дорогам не настроен. Выберите самовывоз или свяжитесь с магазином.");
-      const url=new URL("route/v1/driving/"+branch.coordinates.slice().reverse().join(",")+";"+destination.slice().reverse().join(","),String(env.ROUTER_URL).replace(/\/?$/,"/"));
-      url.searchParams.set("overview","false");
-      const res=await fetch(url,{signal:AbortSignal.timeout(8000)}),data=await res.json() as {code:string;routes?:{distance:number}[]};
-      if(!res.ok || data.code!=="Ok" || !data.routes?.length || !Number.isFinite(data.routes[0].distance) || data.routes[0].distance<0) throw new Error("Не удалось построить автомобильный маршрут");
-      return {branch,km:data.routes[0].distance/1000};
-    }
-    return {branch,km:directKm(branch.coordinates,destination)*1.28};
-  }));
+  const distances=s.deliveryMode==="road"?await roadDistances(destination):BRANCHES.map(branch=>directKm(branch.coordinates,destination)*1.28);
+  const candidates=BRANCHES.flatMap((branch,index)=>distances[index]===null?[]:[{branch,km:distances[index]!}]);
+  if(!candidates.length) throw new Error("К этому дому не найден автомобильный маршрут. Уточните точку на карте.");
   const nearest=candidates.sort((a,b)=>a.km-b.km)[0];
   const distanceKm=Number(nearest.km.toFixed(1));
   const price=Math.round(s.deliveryBase+Math.max(0,distanceKm-s.deliveryIncludedKm)*s.deliveryPerKm);
