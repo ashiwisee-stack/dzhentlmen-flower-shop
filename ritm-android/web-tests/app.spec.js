@@ -89,3 +89,14 @@ test('backup schema rejects foreign files and excludes executable photo payloads
  s.days[C.dateKey()]=C.emptyDay();s.days[C.dateKey()].skin.redness=0;
  expect(C.normalize(s).days[C.dateKey()].skin.redness).toBe(0);
 });
+
+test('backup replacement restores data through the actual dialog',async({page})=>{
+ await start(page);
+ await page.getByRole('button',{name:'+200 мл',exact:true}).click();
+ const snapshot=await page.evaluate(()=>localStorage.getItem('ritm.v1'));
+ await page.getByRole('button',{name:'+250 мл',exact:true}).click();
+ await expect(page.getByText('Все напитки: 450 мл')).toBeVisible();
+ await page.evaluate(text=>window.Ritm.importState(text),snapshot);
+ await page.getByRole('button',{name:'Восстановить',exact:true}).click();
+ await page.reload();await expect(page.getByText('Все напитки: 200 мл')).toBeVisible();
+});

@@ -298,6 +298,8 @@ document.addEventListener('submit',e=>{
  const value=id=>$('#'+id).value;
  const times=value('waterTimes').split(',').map(x=>x.trim()).filter(Boolean);
  if(times.some(x=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(x))||times.length>12){toast('Время воды: ЧЧ:ММ через запятую, до 12 отметок');return;}
+ if(['wakeWork','wakeOff','eveningTime','trainingTime','quietStart','quietEnd'].some(k=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(value(k)))){toast('Заполни время в формате ЧЧ:ММ');return;}
+ if([['sleepGoal',7,9],['latency',0,90],['cupMl',50,1000],['waterGoal',0,4000]].some(([k,a,b])=>value(k)===''||!Number.isFinite(Number(value(k)))||Number(value(k))<a||Number(value(k))>b)){toast('Проверь числовые настройки');return;}
  if(!C.validDate(value('anchorDate'))){toast('Проверь опорную дату');return;}
  const patch={anchorDate:value('anchorDate'),anchorPhase:Number(value('anchorPhase')),waterTimes:times.join(','),moisturizer:value('moisturizer'),roller:$('#roller').checked,notifications:$('#notifications').checked};
  ['wakeWork','wakeOff','eveningTime','trainingTime','quietStart','quietEnd'].forEach(k=>patch[k]=value(k));
