@@ -1,0 +1,46 @@
+name: Build Regime42 APK
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct Android project
+        shell: bash
+        run: |
+          cat .github/regime42_payload/part00 .github/regime42_payload/part01 .github/regime42_payload/part02 > /tmp/regime42.b64
+          base64 -d /tmp/regime42.b64 > /tmp/regime42.zip
+          unzip -q /tmp/regime42.zip -d /tmp/build
+          test -f /tmp/build/regime42_android/app/build.gradle
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build APK
+        working-directory: /tmp/build/regime42_android
+        run: gradle --no-daemon assembleDebug
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          cp /tmp/build/regime42_android/app/build/outputs/apk/debug/app-debug.apk /tmp/Regime-4-2.apk
+          ls -lh /tmp/Regime-4-2.apk
+          sha256sum /tmp/Regime-4-2.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Regime-4-2-APK
+          path: /tmp/Regime-4-2.apk
+          if-no-files-found: error
