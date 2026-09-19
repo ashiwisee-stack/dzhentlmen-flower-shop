@@ -14,8 +14,10 @@ jobs:
       - name: Reconstruct Android project
         shell: bash
         run: |
-          cat .github/regime42_payload/part00 .github/regime42_payload/part01 .github/regime42_payload/part02 > /tmp/regime42.b64
+          cat .github/regime42_payload/p00 .github/regime42_payload/p01 .github/regime42_payload/p02 .github/regime42_payload/p03 .github/regime42_payload/p04 .github/regime42_payload/p05 > /tmp/regime42.b64
+          test "$(wc -c < /tmp/regime42.b64)" -eq 23716
           base64 -d /tmp/regime42.b64 > /tmp/regime42.zip
+          echo "4df982241f04f412b0c01885ed547d5506b847d77b4d6a24bf3648b7df8b8a34  /tmp/regime42.zip" | sha256sum -c -
           unzip -q /tmp/regime42.zip -d /tmp/build
           test -f /tmp/build/regime42_android/app/build.gradle
 
@@ -36,6 +38,7 @@ jobs:
         shell: bash
         run: |
           cp /tmp/build/regime42_android/app/build/outputs/apk/debug/app-debug.apk /tmp/Regime-4-2.apk
+          unzip -t /tmp/Regime-4-2.apk >/dev/null
           ls -lh /tmp/Regime-4-2.apk
           sha256sum /tmp/Regime-4-2.apk
 
